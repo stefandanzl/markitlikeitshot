@@ -1,0 +1,12 @@
+services:
+
+  markitdown:
+    build: 
+      context: ./markitdown-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./markitdown-service/app:/app/app
+    environment:
+      - ENVIRONMENT=development
