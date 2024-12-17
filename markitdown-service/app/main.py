@@ -95,69 +95,6 @@ def clean_html_content(html_content: str) -> str:
         logger.exception("Error cleaning HTML content")
         return html_content  # Return original content if cleaning fails
 
-def clean_markdown(markdown_text: str) -> str:
-    """
-    Cleanup of markdown output.
-    Handles various formatting issues and improves readability.
-    """
-    if not markdown_text:
-        return ""
-
-    # Initial cleanup
-    markdown_text = markdown_text.strip()
-
-    # Fix spacing issues
-    markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
-    markdown_text = re.sub(r' {3,}', ' ', markdown_text)
-
-    # Fix header formatting
-    markdown_text = re.sub(r'(?m)^#+\s*$', '', markdown_text)
-    markdown_text = re.sub(r'(?m)^(#+)([^\s])', r'\1 \2', markdown_text)
-
-    # Fix list formatting
-    markdown_text = re.sub(r'(?m)^(\s*[-*+])[^\s]', r'\1 ', markdown_text)
-    markdown_text = re.sub(r'(?m)^(\s*\d+\.)[^\s]', r'\1 ', markdown_text)
-
-    # Fix table formatting
-    def fix_table_row(match):
-        cells = [cell.strip() for cell in match.group(0).split('|')]
-        return '|' + '|'.join(cells) + '|'
-
-    markdown_text = re.sub(r'\|[^\n]+\|', fix_table_row, markdown_text)
-
-    def fix_table_headers(match):
-        header_row = match.group(1)
-        cells_count = len([cell for cell in header_row.split('|') if cell.strip()])
-        separator = '|' + '|'.join(['---' for _ in range(cells_count)]) + '|'
-        return f"{header_row}\n{separator}"
-
-    markdown_text = re.sub(r'(\|[^\n]+\|)\n(?!\|[-|]+\|)', fix_table_headers, markdown_text)
-
-    # Fix inline code formatting
-    markdown_text = re.sub(r'(?<!`)`(?!`)([^`]+?)(?<!`)`(?!`)', r'`\1`', markdown_text)
-
-    # Fix blockquote formatting
-    markdown_text = re.sub(r'(?m)^>\s*$', '', markdown_text)
-    markdown_text = re.sub(r'(?m)^>([^\s])', r'> \1', markdown_text)
-
-    # Fix link formatting
-    markdown_text = re.sub(r'\[([^\]]+)\]\s*\(([^\)]+)\)', r'[\1](\2)', markdown_text)
-
-    # Fix emphasis formatting
-    markdown_text = re.sub(r'(?<![\*_])\*{2}([^\*]+)\*{2}(?![\*_])', r'**\1**', markdown_text)
-    markdown_text = re.sub(r'(?<![\*_])\*([^\*]+)\*(?![\*_])', r'*\1*', markdown_text)
-
-    # Clean up whitespace
-    markdown_text = re.sub(r'[ \t]+$', '', markdown_text, flags=re.MULTILINE)
-    markdown_text = re.sub(r'^\s+$', '', markdown_text, flags=re.MULTILINE)
-
-    # Ensure proper spacing between different elements
-    markdown_text = re.sub(r'\n{3,}', '\n\n', markdown_text)
-    markdown_text = re.sub(r'(?m)^(#+.*)\n([^#\n])', r'\1\n\n\2', markdown_text)
-    markdown_text = re.sub(r'(?m)(^[^#\n].*)\n(#+)', r'\1\n\n\2', markdown_text)
-
-    return markdown_text.strip()
-
 def save_temp_file(content: bytes, suffix: str) -> str:
     """
     Save content to a temporary file and return the file path.
@@ -197,7 +134,7 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         else:
             result = converter.convert(file_path, file_extension=ext, url=url)
             
-        markdown_content = clean_markdown(result.text_content)
+        markdown_content = result.text_content
         logger.debug("Markdown content cleaned up")
         return markdown_content
     except Exception as e:
