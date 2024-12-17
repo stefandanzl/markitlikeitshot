@@ -1,5 +1,7 @@
 # MarkItLikeItsHot - a FastAPI Wrapper for MarkItDown
 
+[![Tests](https://github.com/matthewdeaves/markitlikeitshot/actions/workflows/tests.yml/badge.svg)](https://github.com/matthewdeaves/markitlikeitshot/actions/workflows/tests.yml)
+
 A rough n ready [FastAPI-based](https://fastapi.tiangolo.com/) service that puts a simple API in front of [markitdown](https://github.com/microsoft/markitdown) by Microsoft. You can make requests to it to convert various file formats and web content to clean, formatted Markdown.
 
 ## Features
