@@ -10,20 +10,34 @@ import os
 import logging
 import requests
 import re
+from app.core.config import settings
+
+# Custom exceptions
+class FileProcessingError(Exception):
+    pass
+
+class ConversionError(Exception):
+    pass
+
+class URLFetchError(Exception):
+    pass
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="MarkItDown API")
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION
+)
 
-# Configure CORS (Consider restricting in production)
+# Configure CORS with settings
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update with specific origins in production
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=settings.ALLOWED_METHODS,
+    allow_headers=settings.ALLOWED_HEADERS,
 )
 
 class TextInput(BaseModel):
@@ -38,17 +52,19 @@ def save_temp_file(content: bytes, suffix: str) -> str:
     """
     Save content to a temporary file and return the file path.
     """
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
-        temp_file.write(content)
-        temp_file.close()
-        logger.debug(f"Temporary file created at: {temp_file.name}")
-        return temp_file.name
-    except Exception as e:
-        logger.exception("Failed to create temporary file")
-        raise
-    finally:
-        temp_file.close()
+    if len(content) > settings.MAX_FILE_SIZE:
+        raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        try:
+            temp_file.write(content)
+            logger.debug(f"Temporary file created at: {temp_file.name}")
+            return temp_file.name
+        except Exception as e:
+            logger.exception("Failed to create temporary file")
+            if os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
+            raise FileProcessingError(f"Failed to create temporary file: {str(e)}")
 
 def process_conversion(file_path: str, ext: str, url: Optional[str] = None, content_type: str = None) -> str:
     """
@@ -58,7 +74,6 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         converter = MarkItDown()
         
         if url and "wikipedia.org" in url:
-            # Use WikipediaConverter for Wikipedia URLs
             logger.debug("Using WikipediaConverter for Wikipedia URL")
             result = converter.convert(file_path, file_extension=ext, url=url, converter_type='wikipedia')
         else:
@@ -69,7 +84,7 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         return markdown_content
     except Exception as e:
         logger.exception("Conversion failed")
-        raise
+        raise ConversionError(f"Failed to convert content: {str(e)}")
 
 @app.post("/convert/text", response_class=PlainTextResponse)
 async def convert_text(text_input: TextInput):
@@ -81,9 +96,14 @@ async def convert_text(text_input: TextInput):
         temp_file_path = save_temp_file(content.encode('utf-8'), suffix='.html')
         markdown_content = process_conversion(temp_file_path, '.html')
         return markdown_content
+    except FileProcessingError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConversionError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.exception("Error during text conversion")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unexpected error during text conversion")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                          detail="An unexpected error occurred during conversion")
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
@@ -94,26 +114,25 @@ async def convert_file(file: UploadFile = File(...)):
     """Convert an uploaded file to markdown."""
     temp_file_path = None
     try:
-        supported_extensions = [
-            '.pdf', '.docx', '.pptx', '.xlsx', '.wav', '.mp3',
-            '.jpg', '.jpeg', '.png', '.html', '.htm', '.txt', '.csv', '.json', '.xml'
-        ]
         _, ext = os.path.splitext(file.filename)
-        if ext.lower() not in supported_extensions:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unsupported file type: {ext}"
-            )
+        if ext.lower() not in settings.SUPPORTED_EXTENSIONS:
+            raise FileProcessingError(f"Unsupported file type: {ext}")
+
         content = await file.read()
+        if len(content) > settings.MAX_FILE_SIZE:
+            raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
+
         temp_file_path = save_temp_file(content, suffix=ext)
         markdown_content = process_conversion(temp_file_path, ext)
         return markdown_content
-    except HTTPException as he:
-        logger.exception("HTTPException during file conversion")
-        raise he
+    except FileProcessingError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConversionError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.exception("Error during file conversion")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unexpected error during file conversion")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                          detail="An unexpected error occurred during conversion")
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
@@ -125,21 +144,20 @@ async def convert_url(url_input: UrlInput):
     temp_file_path = None
     try:
         logger.debug(f"Fetching URL: {url_input.url}")
-        headers = {
-            'User-Agent': (
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                'AppleWebKit/537.36 (KHTML, like Gecko) '
-                'Chrome/91.0.4472.124 Safari/537.36'
-            )
-        }
-        response = requests.get(str(url_input.url), headers=headers, timeout=10)
+        headers = {'User-Agent': settings.USER_AGENT}
+        
+        response = requests.get(
+            str(url_input.url), 
+            headers=headers, 
+            timeout=settings.REQUEST_TIMEOUT
+        )
         response.raise_for_status()
+        
         content = response.content
-        ext = '.html'
-        temp_file_path = save_temp_file(content, suffix=ext)
+        temp_file_path = save_temp_file(content, suffix='.html')
         markdown_content = process_conversion(
             temp_file_path,
-            ext,
+            '.html',
             url=str(url_input.url)
         )
         return markdown_content
@@ -149,9 +167,14 @@ async def convert_url(url_input: UrlInput):
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error fetching URL: {str(e)}"
         )
+    except FileProcessingError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except ConversionError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
     except Exception as e:
-        logger.exception("Error during URL conversion")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Unexpected error during URL conversion")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+                          detail="An unexpected error occurred during conversion")
     finally:
         if temp_file_path and os.path.exists(temp_file_path):
             os.unlink(temp_file_path)
