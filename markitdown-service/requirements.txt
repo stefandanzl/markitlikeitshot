@@ -6,5 +6,9 @@ pydantic>=2.0.0
 python-dotenv
 beautifulsoup4
 pydantic-settings
-slowapi>=0.1.5
 git+https://github.com/microsoft/markitdown.git
+slowapi
+pytest
+httpx
+pytest-asyncio
+pytest-cov

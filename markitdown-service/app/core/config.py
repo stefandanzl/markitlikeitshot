@@ -1,7 +1,11 @@
 from pydantic_settings import BaseSettings
 from typing import List
+import os
 
 class Settings(BaseSettings):
+    # Environment
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    
     # API Settings
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "MarkItDown API"
@@ -23,8 +27,8 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting Settings
-    RATE_LIMIT_REQUESTS: int = 120  # Updated to 120 requests
-    RATE_LIMIT_WINDOW: int = 3600  # 1 hour
+    RATE_LIMIT_REQUESTS: int = 10
+    RATE_LIMIT_WINDOW: int = 60
 
     # CORS Settings
     ALLOWED_ORIGINS: List[str] = ["*"]
@@ -32,7 +36,11 @@ class Settings(BaseSettings):
     ALLOWED_HEADERS: List[str] = ["*"]
 
     # Logging configuration
-    LOG_LEVEL: str = "DEBUG"
+    @property
+    def LOG_LEVEL(self) -> str:
+        if self.ENVIRONMENT == "test":
+            return "WARNING"
+        return "DEBUG"
     
     class Config:
         case_sensitive = True

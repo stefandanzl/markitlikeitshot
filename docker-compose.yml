@@ -1,5 +1,4 @@
 services:
-
   markitdown:
     build: 
       context: ./markitdown-service
@@ -10,3 +9,19 @@ services:
       - ./markitdown-service/app:/app/app
     environment:
       - ENVIRONMENT=development
+
+  test:
+    build: 
+      context: ./markitdown-service
+      dockerfile: Dockerfile
+    volumes:
+      - ./markitdown-service:/app
+    environment:
+      - ENVIRONMENT=test
+      - PYTHONPATH=/app
+    entrypoint: python -m pytest
+    command: /app/tests/test_api.py -v --capture=no
+    depends_on:
+      - markitdown
+    profiles:
+      - test

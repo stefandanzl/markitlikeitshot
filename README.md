@@ -35,7 +35,7 @@ curl -X POST "http://localhost:8000/convert/text" \
      -d '{"content": "<h1>Hello World</h1><p>This is a test</p>"}'
 ```
 
-### Convert URL Content
+### Convert Wikipedia Content
 ```bash
 curl -X POST "http://localhost:8000/convert/url" \
      -H "Content-Type: application/json" \
@@ -47,4 +47,59 @@ curl -X POST "http://localhost:8000/convert/url" \
 curl -X POST "http://localhost:8000/convert/url" \
      -H "Content-Type: application/json" \
      -d '{"url": "https://www.bbc.co.uk/news/articles/c6p229ldn4vo"}'
+```
+
+## Testing
+
+### Running Tests
+To run the test suite:
+```bash
+# Run normal tests
+sudo docker-compose --profile test run --rm test
+
+# Run tests with debug logging
+sudo docker-compose --profile test run --rm test /app/tests/test_api.py -v --capture=no --log-cli-level=DEBUG
+
+# Run specific test
+sudo docker-compose --profile test run --rm test /app/tests/test_api.py::test_convert_text_basic
+```
+
+### Test Configuration
+Tests are configured via:
+- `pytest.ini`: Controls test discovery and logging
+- `conftest.py`: Provides test fixtures and configuration
+- `test_api.py`: Contains the actual test cases
+
+### Environment Variables
+The test environment:
+- Uses WARNING level logging by default
+- Automatically removes test containers after completion
+- Runs all tests in the `/tests` directory
+- Includes rate limiting, file conversion, and API endpoint tests
+
+## Project Structure
+
+```
+markitlikeitshot/
+├── docker-compose.yml
+├── markitdown-service
+│   ├── app
+│   │   ├── api
+│   │   │   └── __init__.py
+│   │   ├── core
+│   │   │   ├── config.py
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── models
+│   │   │   └── __init__.py
+│   ├── Dockerfile
+│   ├── pytest.ini
+│   ├── requirements.txt
+│   ├── test_files
+│   │   └── TestDoc.docx
+│   └── tests
+│       ├── conftest.py
+│       ├── __init__.py
+│       └── test_api.py
+└── README.md
 ```
