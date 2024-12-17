@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting Settings
-    RATE_LIMIT_REQUESTS: int = 100
+    RATE_LIMIT_REQUESTS: int = 120  # Updated to 120 requests
     RATE_LIMIT_WINDOW: int = 3600  # 1 hour
 
     # CORS Settings

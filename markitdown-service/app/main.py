@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, HttpUrl
@@ -11,6 +11,10 @@ import logging
 import requests
 import re
 from app.core.config import settings
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 # Custom exceptions
 class FileProcessingError(Exception):
@@ -26,10 +30,18 @@ class URLFetchError(Exception):
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION
 )
+
+# Add rate limiter to app
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # Configure CORS with settings
 app.add_middleware(
@@ -87,7 +99,8 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         raise ConversionError(f"Failed to convert content: {str(e)}")
 
 @app.post("/convert/text", response_class=PlainTextResponse)
-async def convert_text(text_input: TextInput):
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+async def convert_text(request: Request, text_input: TextInput):
     """Convert text or HTML to markdown."""
     temp_file_path = None
     try:
@@ -110,7 +123,8 @@ async def convert_text(text_input: TextInput):
             logger.debug("Temporary file cleaned up")
 
 @app.post("/convert/file", response_class=PlainTextResponse)
-async def convert_file(file: UploadFile = File(...)):
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+async def convert_file(request: Request, file: UploadFile = File(...)):
     """Convert an uploaded file to markdown."""
     temp_file_path = None
     try:
@@ -139,7 +153,8 @@ async def convert_file(file: UploadFile = File(...)):
             logger.debug("Temporary file cleaned up")
 
 @app.post("/convert/url", response_class=PlainTextResponse)
-async def convert_url(url_input: UrlInput):
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+async def convert_url(request: Request, url_input: UrlInput):
     """Fetch a URL and convert its content to markdown."""
     temp_file_path = None
     try:
