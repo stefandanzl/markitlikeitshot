@@ -34,67 +34,6 @@ class UrlInput(BaseModel):
     url: HttpUrl
     options: Optional[dict] = None
 
-def clean_html_content(html_content: str) -> str:
-    """
-    Clean HTML content using BeautifulSoup before conversion to markdown.
-    Removes unnecessary elements while preserving important content.
-    """
-    try:
-        soup = BeautifulSoup(html_content, 'html.parser')
-
-        # Remove definitely unwanted elements
-        selectors_to_remove = [
-            'script',                    # JavaScript
-            'style',                     # CSS
-            'iframe',                    # Embedded frames
-            '.cookie-notice',            # Cookie notices
-            '.newsletter-signup',        # Newsletter signups
-            '.advertisement',            # Explicit ads
-            '.ads',                      # More ads
-            '.social-share',             # Social sharing buttons
-            '.comment-section',          # Comment sections
-            'form',                      # Forms
-            'meta',                      # Meta tags
-            'link[rel="stylesheet"]',    # External stylesheets
-        ]
-
-        # Navigation elements that are clearly not main content
-        nav_selectors = [
-            'nav[aria-label="Footer"]',          # Footer navigation
-            'nav[aria-label="Primary"]',         # Primary navigation
-            'nav.site-header',                   # Site header navigation
-            '.global-navigation',                # Global navigation
-            '.footer-links',                     # Footer links
-            '.skip-link',                        # Skip links
-            '.breadcrumbs',                      # Breadcrumb navigation
-        ]
-
-        # Remove unwanted elements
-        for selector in selectors_to_remove + nav_selectors:
-            elements = soup.select(selector)
-            for element in elements:
-                element.decompose()
-
-        # Remove empty elements (but preserve images and their containers)
-        for element in soup.find_all():
-            # Skip images and their parent containers
-            if element.name == 'img' or element.find('img'):
-                continue
-            # Skip elements with specific roles
-            if element.get('role') in ['main', 'article', 'contentinfo']:
-                continue
-            # Remove if truly empty
-            if len(element.get_text(strip=True)) == 0 and not element.find('img'):
-                element.decompose()
-
-        # Convert the cleaned HTML back to string
-        cleaned_html = str(soup)
-        return cleaned_html
-
-    except Exception as e:
-        logger.exception("Error cleaning HTML content")
-        return html_content  # Return original content if cleaning fails
-
 def save_temp_file(content: bytes, suffix: str) -> str:
     """
     Save content to a temporary file and return the file path.
@@ -118,15 +57,6 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
     try:
         converter = MarkItDown()
         
-        # Special handling for HTML content that isn't Wikipedia
-        if ext.lower() in ['.html', '.htm'] and (not url or "wikipedia.org" not in url):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                html_content = f.read()
-            cleaned_html = clean_html_content(html_content)
-            # Save cleaned HTML to temporary file
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(cleaned_html)
-
         if url and "wikipedia.org" in url:
             # Use WikipediaConverter for Wikipedia URLs
             logger.debug("Using WikipediaConverter for Wikipedia URL")
@@ -148,11 +78,6 @@ async def convert_text(text_input: TextInput):
     try:
         logger.debug(f"Received content: {text_input.content[:100]}...")
         content = text_input.content
-        
-        # If content appears to be HTML, clean it first
-        if re.search(r'<[^>]+>', content):
-            content = clean_html_content(content)
-            
         temp_file_path = save_temp_file(content.encode('utf-8'), suffix='.html')
         markdown_content = process_conversion(temp_file_path, '.html')
         return markdown_content
@@ -209,12 +134,7 @@ async def convert_url(url_input: UrlInput):
         }
         response = requests.get(str(url_input.url), headers=headers, timeout=10)
         response.raise_for_status()
-
         content = response.content
-        if "wikipedia.org" not in str(url_input.url):
-            # Only clean non-Wikipedia HTML content
-            content = clean_html_content(response.text).encode('utf-8')
-
         ext = '.html'
         temp_file_path = save_temp_file(content, suffix=ext)
         markdown_content = process_conversion(
