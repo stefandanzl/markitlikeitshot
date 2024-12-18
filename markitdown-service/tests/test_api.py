@@ -1,3 +1,4 @@
+from app.core.config import settings
 from .conftest import TEST_WIKI_URL, TEST_BBC_URL, TEST_HTML
 
 def test_convert_text_basic(client):
@@ -164,3 +165,30 @@ def test_convert_file(client, test_doc_path):
     # Verify markdown hierarchy
     assert content.count('#') >= 6  # At least 6 heading markers
     assert "###" in content  # Contains third-level headings
+
+def test_health_check(client):
+    """Test the health check endpoint"""
+    response = client.get("/health")
+    
+    # Check status code
+    assert response.status_code == 200
+    
+    # Get response data
+    data = response.json()
+    
+    # Check structure
+    assert "status" in data
+    assert "version" in data
+    assert "supported_formats" in data
+    
+    # Check content types
+    assert isinstance(data["status"], str)
+    assert isinstance(data["version"], str)
+    assert isinstance(data["supported_formats"], list)
+    
+    # Check specific values
+    assert data["status"] == "healthy"
+    assert data["version"] == settings.VERSION
+    assert all(isinstance(ext, str) for ext in data["supported_formats"])
+    assert all(ext.startswith('.') for ext in data["supported_formats"])
+    assert set(data["supported_formats"]) == set(settings.SUPPORTED_EXTENSIONS)

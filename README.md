@@ -51,6 +51,11 @@ curl -X POST "http://localhost:8000/convert/url" \
      -d '{"url": "https://www.bbc.co.uk/news/articles/c6p229ldn4vo"}'
 ```
 
+### Service Healthcheck
+```bash
+curl -X GET "http://localhost:8000/health"
+```
+
 ## Testing
 
 ### Running Tests
