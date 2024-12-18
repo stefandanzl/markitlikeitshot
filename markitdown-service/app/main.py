@@ -152,7 +152,6 @@ def get_rate_limit_headers(request: Request) -> dict:
         "X-RateLimit-Reset": str(getattr(request.state, "view_rate_limit_reset", 0))
     }
 
-
 @contextmanager
 def error_handler():
     try:
@@ -172,8 +171,6 @@ def error_handler():
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                           detail="An unexpected error occurred during conversion")
 
-
-
 @app.post("/convert/text", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
 async def convert_text(request: Request, text_input: TextInput):
@@ -185,7 +182,6 @@ async def convert_text(request: Request, text_input: TextInput):
             markdown_content = process_conversion(temp_file_path, '.html')
             headers = get_rate_limit_headers(request)
             return RateLimitedResponse(content=markdown_content, headers=headers)
-
 
 @app.post("/convert/file", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
@@ -204,8 +200,6 @@ async def convert_file(request: Request, file: UploadFile = File(...)):
             markdown_content = process_conversion(temp_file_path, ext)
             headers = get_rate_limit_headers(request)
             return RateLimitedResponse(content=markdown_content, headers=headers)
-
-
 
 @app.post("/convert/url", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
@@ -231,3 +225,12 @@ async def convert_url(request: Request, url_input: UrlInput):
             )
             headers = get_rate_limit_headers(request)
             return RateLimitedResponse(content=markdown_content, headers=headers)
+
+@app.get("/health")
+async def health_check():
+    """Check the health of the service."""
+    return {
+        "status": "healthy",
+        "version": settings.VERSION,
+        "supported_formats": settings.SUPPORTED_EXTENSIONS
+    }
