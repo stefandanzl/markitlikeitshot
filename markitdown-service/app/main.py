@@ -98,16 +98,18 @@ def save_temp_file(content: bytes, suffix: str) -> str:
     if len(content) > settings.MAX_FILE_SIZE:
         raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
 
-    with tempfile.NamedTemporaryFile(suffix=suffix) as temp_file:
+    with tempfile.NamedTemporaryFile(suffix=suffix, mode='w+b', delete=False) as temp_file:
         try:
             temp_file.write(content)
+            temp_file.flush()
             logger.debug(f"Temporary file created at: {temp_file.name}")
             yield temp_file.name
         except Exception as e:
             logger.exception("Failed to create temporary file")
+            raise FileProcessingError(f"Failed to create temporary file: {str(e)}")
+        finally:
             if os.path.exists(temp_file.name):
                 os.unlink(temp_file.name)
-            raise FileProcessingError(f"Failed to create temporary file: {str(e)}")
 
 def process_conversion(file_path: str, ext: str, url: Optional[str] = None, content_type: str = None) -> str:
     """
@@ -116,11 +118,22 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
     try:
         converter = MarkItDown()
         
+        # Check if file exists and has content
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            raise ConversionError("Input file is empty or does not exist")
+            
         if url and "wikipedia.org" in url:
             logger.debug("Using WikipediaConverter for Wikipedia URL")
             result = converter.convert(file_path, file_extension=ext, url=url, converter_type='wikipedia')
         else:
-            result = converter.convert(file_path, file_extension=ext, url=url)
+            # For HTML content, use the html2text converter explicitly
+            if ext.lower() == '.html':
+                result = converter.convert(file_path, file_extension=ext, converter_type='html')
+            else:
+                result = converter.convert(file_path, file_extension=ext, url=url)
+            
+        if not result or not result.text_content:
+            raise ConversionError("Conversion resulted in empty content")
             
         markdown_content = result.text_content
         logger.debug("Markdown content cleaned up")
