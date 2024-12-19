@@ -18,3 +18,4 @@ rich
 passlib[bcrypt]
 python-jose[cryptography]
 ipython
+bcrypt
