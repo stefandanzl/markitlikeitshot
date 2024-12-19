@@ -417,15 +417,3 @@ async def convert_url(
             )
             
             return RateLimitedResponse(content=markdown_content, headers=headers)
-
-@router.get("/stats", dependencies=[Depends(require_admin)])
-async def get_conversion_stats():
-    """Get conversion statistics (admin only)."""
-    logger.info("Retrieving conversion statistics")
-    # TODO: Implement actual statistics gathering
-    stats = {
-        "total_conversions": 0,
-        "successful_conversions": 0,
-        "failed_conversions": 0
-    }
-    return stats
