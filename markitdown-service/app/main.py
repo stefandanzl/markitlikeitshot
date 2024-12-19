@@ -9,6 +9,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
@@ -135,7 +136,7 @@ async def health_check():
     try:
         # Verify database connection
         db = next(get_db())
-        db.execute("SELECT 1")  # Simple query to check database connection
+        db.execute(text("SELECT 1"))
         
         health_status = {
             "status": "healthy",
