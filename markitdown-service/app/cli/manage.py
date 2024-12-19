@@ -1,7 +1,7 @@
 import typer
 from app.cli.commands import api_key
 from app.db.init_db import init_db
-from app.db.session import get_db
+from app.db.session import get_db_session
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -24,38 +24,53 @@ console = Console()
 # Set up logging
 logger = logging.getLogger(__name__)
 
-def setup_logging():
-    """Configure logging for the CLI"""
+def setup_logging(quiet: bool = False):
+    """
+    Configure logging for the CLI.
+    
+    Args:
+        quiet (bool): If True, sets more restrictive logging for interactive CLI
+    """
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
     log_file = log_dir / f"cli_{datetime.now().strftime('%Y%m%d')}.log"
     
-    logging.basicConfig(
-        level=getattr(logging, settings.LOG_LEVEL),
-        format=settings.LOG_FORMAT,
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
+    # Set up file handler with full logging
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(logging.Formatter(settings.LOG_FORMAT))
+
+    # Set up console handler with restricted logging if quiet mode
+    console_handler = logging.StreamHandler()
+    if quiet:
+        console_handler.setLevel(logging.WARNING)
+    else:
+        console_handler.setLevel(getattr(logging, settings.LOG_LEVEL))
+    console_handler.setFormatter(logging.Formatter('%(message)s'))
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.handlers = []
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+    # Configure specific loggers
+    if quiet:
+        logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+        logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+        logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+        logging.getLogger('sqlalchemy.orm').setLevel(logging.WARNING)
+        logging.getLogger('app.db.session').setLevel(logging.WARNING)
+        logging.getLogger('asyncio').setLevel(logging.WARNING)
+    
+    # Always keep audit logging at INFO
+    logging.getLogger('audit').setLevel(logging.INFO)
 
 def setup_shell_logging():
     """Configure quieter logging for shell sessions"""
-    # Set SQLAlchemy loggers to WARNING level
-    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
-    logging.getLogger('sqlalchemy.orm').setLevel(logging.WARNING)
-    
-    # Set asyncio logger to WARNING
-    logging.getLogger('asyncio').setLevel(logging.WARNING)
-    
-    # Keep audit logging at INFO
-    logging.getLogger('audit').setLevel(logging.INFO)
-    
-    # Set root logger to WARNING
-    logging.getLogger().setLevel(logging.WARNING)
+    setup_logging(quiet=True)
 
 def display_version_info():
     """Display version information in a table."""
@@ -77,11 +92,18 @@ def display_version_info():
     ))
 
 @app.callback()
-def callback():
+def callback(
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Reduce logging output"
+    )
+):
     """
     MarkItDown API Management CLI
     """
-    setup_logging()
+    setup_logging(quiet=quiet)
     console.print(
         Panel.fit(
             "MarkItDown API Management",
@@ -116,9 +138,9 @@ def init(
             os.makedirs(dir_name, exist_ok=True)
         
         with console.status("[bold blue]Initializing database...") as status:
-            db = next(get_db())
-            init_db(db)
-            status.update("[bold blue]Creating initial admin key...")
+            with get_db_session() as db:
+                init_db(db)
+                status.update("[bold blue]Creating initial admin key...")
         
         console.print(Panel(
             "[green]Database initialized successfully![/green]\n"
@@ -150,18 +172,20 @@ def shell(
         from app.core.security.api_key import create_api_key
         from sqlmodel import select
         
-        # Create context dictionary
-        context = {
-            'settings': settings,
-            'APIKey': APIKey,
-            'Role': Role,
-            'create_api_key': create_api_key,
-            'select': select,
-            'db': next(get_db()),
-            'console': console
-        }
-        
-        banner = "" if quiet else f"""
+        # Create context dictionary with a new database session
+        with get_db_session() as db:
+            context = {
+                'settings': settings,
+                'APIKey': APIKey,
+                'Role': Role,
+                'create_api_key': create_api_key,
+                'select': select,
+                'db': db,
+                'console': console,
+                'get_db_session': get_db_session  # Add session manager to context
+            }
+            
+            banner = "" if quiet else f"""
 ╔══════════════════════════════════════════╗
 ║        MarkItDown Management Shell       ║
 ╚══════════════════════════════════════════╝
@@ -174,17 +198,19 @@ Available objects:
 • select: SQLModel select function
 • db: Database session
 • console: Rich console for formatted output
+• get_db_session: Database session context manager
 
 Example usage:
->>> keys = db.exec(select(APIKey)).all()
->>> console.print(keys)
+>>> with get_db_session() as db:
+...     keys = db.exec(select(APIKey)).all()
+...     console.print(keys)
 """
-        
-        IPython.embed(
-            banner1=banner,
-            colors="neutral",
-            user_ns=context
-        )
+            
+            IPython.embed(
+                banner1=banner,
+                colors="neutral",
+                user_ns=context
+            )
     except Exception as e:
         console.print(f"[red]Error launching shell: {str(e)}[/red]")
         logger.exception("Shell launch failed")
@@ -209,15 +235,16 @@ def check(
         
         # Check database connection
         try:
-            db = next(get_db())
-            db.execute("SELECT 1")
-            checks.append(("Database Connection", True, "Connected"))
+            with get_db_session() as db:
+                db.execute("SELECT 1")
+                checks.append(("Database Connection", True, "Connected"))
         except Exception as e:
             checks.append(("Database Connection", False, str(e)))
             if fix:
                 try:
                     status.update("Attempting to initialize database...")
-                    init_db(db)
+                    with get_db_session() as db:
+                        init_db(db)
                     checks.append(("Database Fix", True, "Initialized successfully"))
                 except Exception as fix_e:
                     checks.append(("Database Fix", False, str(fix_e)))
@@ -331,6 +358,8 @@ def clean(
 @app.command()
 def interactive():
     """Launch interactive API key management interface."""
+    # Set up quieter logging for interactive mode
+    setup_logging(quiet=True)
     from app.cli.interactive import interactive_menu
     interactive_menu()
 

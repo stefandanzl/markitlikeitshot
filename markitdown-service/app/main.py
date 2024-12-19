@@ -7,14 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address  # Added import
+from slowapi.util import get_remote_address
 from sqlalchemy import text
 
 from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
 from app.core.config import settings
-from app.db.init_db import init_db
-from app.db.session import get_db
+from app.db.init_db import ensure_db_initialized
+from app.db.session import get_db, get_db_session
 from app.utils.audit import audit_log
 from app.core.rate_limit import limiter
 
@@ -34,8 +34,7 @@ async def lifespan(app: FastAPI):
     # Startup
     try:
         logger.info("Initializing database...")
-        db = next(get_db())
-        init_db(db)
+        ensure_db_initialized()
         logger.info("Database initialized successfully")
         
         # Log startup configuration
@@ -69,7 +68,7 @@ async def lifespan(app: FastAPI):
         details="Service shutdown initiated"
     )
 
-# Initialize FastAPI app with lifespan (no global API key dependency)
+# Initialize FastAPI app with lifespan
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -141,9 +140,9 @@ app.include_router(
 async def health_check():
     """Check the health of the service."""
     try:
-        # Verify database connection
-        db = next(get_db())
-        db.execute(text("SELECT 1"))
+        # Verify database connection using context manager
+        with get_db_session() as db:
+            db.execute(text("SELECT 1"))
         
         health_status = {
             "status": "healthy",

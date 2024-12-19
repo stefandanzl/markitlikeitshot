@@ -1,5 +1,5 @@
 from sqlmodel import SQLModel, select
-from app.db.session import get_engine
+from app.db.session import get_engine, get_db_session
 from app.core.security.api_key import create_api_key
 from app.models.auth.api_key import Role, APIKey
 from app.core.config import settings
@@ -52,3 +52,18 @@ def init_db(db_session) -> None:
             raise  # Re-raise the exception to ensure startup fails if we can't create admin key
 
     logger.info("Database initialization completed successfully")
+
+def ensure_db_initialized():
+    """
+    Ensure database is initialized. This is a convenience function
+    that can be called during application startup.
+    """
+    try:
+        with get_db_session() as db:
+            init_db(db)
+    except Exception as e:
+        logger.error("Failed to initialize database")
+        logger.exception(e)
+        raise
+
+__all__ = ["init_db", "ensure_db_initialized"]

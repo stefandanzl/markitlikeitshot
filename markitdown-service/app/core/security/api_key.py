@@ -40,90 +40,123 @@ def create_api_key(
     created_by: Optional[int] = None
 ) -> APIKey:
     """Create a new API key."""
-    existing = db.exec(
-        select(APIKey).where(APIKey.name == name)
-    ).first()
-    
-    if existing:
-        raise ValueError(f"API key with name '{name}' already exists")
+    try:
+        # Check for existing key
+        existing = db.exec(
+            select(APIKey).where(APIKey.name == name)
+        ).first()
+        
+        if existing:
+            raise ValueError(f"API key with name '{name}' already exists")
 
-    key = generate_api_key()
-    hashed_key = hash_api_key(key)
-    
-    api_key = APIKey(
-        key=hashed_key,  # Store hashed key
-        name=name,
-        role=role,
-        created_by=created_by
-    )
-    
-    db.add(api_key)
-    db.commit()
-    db.refresh(api_key)
-    
-    # Audit logging
-    audit_log(
-        action="create_api_key",
-        user_id=str(created_by),
-        details=f"Created API key for {name} with role {role}"
-    )
-    
-    # Return the original key (will only be shown once)
-    api_key.key = key
-    return api_key
+        # Generate and hash the key
+        original_key = generate_api_key()
+        hashed_key = hash_api_key(original_key)
+        
+        # Create new API key instance
+        api_key = APIKey(
+            key=hashed_key,
+            name=name,
+            role=role,
+            created_by=created_by
+        )
+        
+        # Add to session and flush to get the ID
+        db.add(api_key)
+        db.flush()
+        
+        # Audit logging
+        audit_log(
+            action="create_api_key",
+            user_id=str(created_by),
+            details=f"Created API key for {name} with role {role}"
+        )
+        
+        # Create response object with unhashed key
+        response_key = APIKey(
+            id=api_key.id,
+            key=original_key,  # Return the unhashed key
+            name=api_key.name,
+            role=api_key.role,
+            created_at=api_key.created_at,
+            created_by=api_key.created_by,
+            is_active=api_key.is_active,
+            last_used=None
+        )
+        
+        return response_key
+        
+    except Exception as e:
+        logger.exception("Failed to create API key")
+        raise
 
 def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
     """Verify an API key and update last used timestamp."""
-    api_keys = db.exec(
-        select(APIKey).where(APIKey.is_active == True)
-    ).all()
-    
-    for api_key in api_keys:
-        if verify_key_hash(key, api_key.key):
-            api_key.last_used = datetime.utcnow()
-            db.commit()
-            
-            # Audit logging
-            audit_log(
-                action="api_key_used",
-                user_id=str(api_key.id),
-                details=f"API key '{api_key.name}' used"
-            )
-            return api_key
-    
-    return None
+    try:
+        api_keys = db.exec(
+            select(APIKey).where(APIKey.is_active == True)
+        ).all()
+        
+        for api_key in api_keys:
+            if verify_key_hash(key, api_key.key):
+                api_key.last_used = datetime.utcnow()
+                db.flush()  # Ensure last_used is updated
+                
+                # Audit logging
+                audit_log(
+                    action="api_key_used",
+                    user_id=str(api_key.id),
+                    details=f"API key '{api_key.name}' used"
+                )
+                return api_key
+        
+        return None
+        
+    except Exception as e:
+        logger.exception("Failed to verify API key")
+        raise
 
 def deactivate_api_key(db: Session, key_id: int, deactivated_by: Optional[int] = None) -> bool:
     """Deactivate an API key."""
-    api_key = db.get(APIKey, key_id)
-    if api_key:
-        api_key.is_active = False
-        db.commit()
+    try:
+        api_key = db.get(APIKey, key_id)
+        if api_key:
+            api_key.is_active = False
+            db.flush()  # Ensure change is reflected
+            
+            # Audit logging
+            audit_log(
+                action="deactivate_api_key",
+                user_id=str(deactivated_by),
+                details=f"Deactivated API key {api_key.name}"
+            )
+            return True
+        return False
         
-        # Audit logging
-        audit_log(
-            action="deactivate_api_key",
-            user_id=str(deactivated_by),
-            details=f"Deactivated API key {api_key.name}"
-        )
-        return True
-    return False
+    except Exception as e:
+        logger.exception(f"Failed to deactivate API key {key_id}")
+        raise
 
 def reactivate_api_key(db: Session, key_id: int, reactivated_by: Optional[int] = None) -> bool:
     """Reactivate an API key."""
-    api_key = db.get(APIKey, key_id)
-    if api_key:
-        api_key.is_active = True
-        db.commit()
+    try:
+        api_key = db.get(APIKey, key_id)
+        if api_key:
+            api_key.is_active = True
+            db.flush()  # Ensure change is reflected
+            
+            # Audit logging
+            audit_log(
+                action="reactivate_api_key",
+                user_id=str(reactivated_by),
+                details=f"Reactivated API key {api_key.name}"
+            )
+            return True
+        return False
         
-        # Audit logging
-        audit_log(
-            action="reactivate_api_key",
-            user_id=str(reactivated_by),
-            details=f"Reactivated API key {api_key.name}"
-        )
-        return True
-    return False
+    except Exception as e:
+        logger.exception(f"Failed to reactivate API key {key_id}")
+        raise
 
 async def get_api_key(
     api_key: str = Security(api_key_header),
@@ -142,21 +175,29 @@ async def get_api_key(
             detail="API key required"
         )
     
-    key = verify_api_key(db, api_key)
-    if not key:
-        # Audit logging for failed attempts
-        audit_log(
-            action="api_key_invalid",
-            user_id=None,
-            details="Invalid API key attempt",
-            status="failure"
-        )
+    try:
+        key = verify_api_key(db, api_key)
+        if not key:
+            # Audit logging for failed attempts
+            audit_log(
+                action="api_key_invalid",
+                user_id=None,
+                details="Invalid API key attempt",
+                status="failure"
+            )
+            raise HTTPException(
+                status_code=HTTP_403_FORBIDDEN,
+                detail="Invalid API key"
+            )
+        
+        return key
+        
+    except Exception as e:
+        logger.exception("API key validation failed")
         raise HTTPException(
             status_code=HTTP_403_FORBIDDEN,
-            detail="Invalid API key"
+            detail="API key validation failed"
         )
-    
-    return key
 
 def require_admin(api_key: APIKey = Depends(get_api_key)):
     """
