@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     tesseract-ocr \
     python3-venv \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Create and activate virtual environment

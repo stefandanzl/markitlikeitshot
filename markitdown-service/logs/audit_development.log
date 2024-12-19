@@ -1,0 +1,10 @@
+2024-12-19 06:17:34,400 - audit - INFO - Action: create_api_key | User: None | Status: success | Details: Created API key for System Admin with role Role.ADMIN
+2024-12-19 06:17:34,400 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:21:12,548 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:30:19,742 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:31:58,714 - audit - INFO - Action: service_shutdown | User: None | Status: success | Details: Service shutdown initiated
+2024-12-19 06:32:00,292 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:32:01,953 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:35:27,611 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
+2024-12-19 06:37:05,072 - audit - INFO - Action: service_shutdown | User: None | Status: success | Details: Service shutdown initiated
+2024-12-19 06:37:06,698 - audit - INFO - Action: service_startup | User: None | Status: success | Details: Service started in development environment
