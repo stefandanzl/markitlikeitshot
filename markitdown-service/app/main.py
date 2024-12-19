@@ -1,6 +1,7 @@
 # app/main.py
 import time
 import logging
+import logging.config
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
+import os
 
 from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
@@ -18,12 +20,77 @@ from app.db.session import get_db, get_db_session
 from app.utils.audit import audit_log
 from app.core.rate_limit import limiter
 
-# Set up logging
+def get_app_logging_config() -> dict:
+    """Get application-specific logging configuration."""
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S"
+            },
+            "simple": {
+                "format": "%(message)s"
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "formatter": "simple",
+                "level": "INFO"
+            },
+            "file": {
+                "class": "logging.handlers.TimedRotatingFileHandler",
+                "formatter": "default",
+                "filename": f"{settings.LOG_DIR}/app_{settings.ENVIRONMENT}.log",
+                "when": settings.LOG_ROTATION,
+                "backupCount": settings.LOG_BACKUP_COUNT,
+                "encoding": settings.LOG_ENCODING,
+                "level": "DEBUG"
+            },
+            "null": {
+                "class": "logging.NullHandler"
+            }
+        },
+        "loggers": {
+            "app": {
+                "handlers": ["console", "file"],
+                "level": "DEBUG",
+                "propagate": False
+            },
+            "sqlalchemy": {
+                "handlers": ["file"],
+                "level": "INFO",
+                "propagate": False
+            },
+            "uvicorn": {
+                "handlers": ["console"],
+                "level": "INFO",
+                "propagate": False
+            },
+            "uvicorn.error": {
+                "handlers": ["console"],
+                "level": "INFO",
+                "propagate": False
+            },
+            "uvicorn.access": {
+                "handlers": ["null"],
+                "level": "WARNING",
+                "propagate": False
+            }
+        }
+    }
+
+# Initialize logging
+os.makedirs(settings.LOG_DIR, exist_ok=True)
+logging.config.dictConfig(get_app_logging_config())
+
+# Create module-specific loggers
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL),
-    format=settings.LOG_FORMAT
-)
+api_logger = logging.getLogger("app.api")
+db_logger = logging.getLogger("app.db")
+security_logger = logging.getLogger("app.core.security")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,27 +100,54 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     try:
-        logger.info("Initializing database...")
-        ensure_db_initialized()
-        logger.info("Database initialized successfully")
+        logger.info("Starting application initialization...")
         
-        # Log startup configuration
-        logger.info(f"Environment: {settings.ENVIRONMENT}")
-        logger.info(f"API Key Auth Enabled: {settings.API_KEY_AUTH_ENABLED}")
-        logger.info(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
+        # Log detailed configuration in debug mode
+        logger.debug("Application configuration:")
+        logger.debug(f"Environment: {settings.ENVIRONMENT}")
+        logger.debug(f"Log Level: {settings.LOG_LEVEL}")
+        logger.debug(f"API Key Auth: {settings.API_KEY_AUTH_ENABLED}")
+        logger.debug(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
         
-        # Audit log startup
+        # Check database state
+        db_file = os.path.join("data", "api_keys.db")
+        if not os.path.exists(db_file):
+            logger.info("Database file not found. Performing initial setup...")
+            ensure_db_initialized()
+        else:
+            logger.info("Database file found. Verifying database state...")
+            try:
+                # Verify database connection and structure
+                with get_db_session() as db:
+                    # Test query to verify database structure
+                    result = db.execute(text("SELECT COUNT(*) FROM api_keys")).scalar()
+                    logger.info(f"Database verification successful. Found {result} API keys.")
+            except Exception as db_error:
+                logger.error(f"Database verification failed: {str(db_error)}")
+                logger.info("Attempting database recovery...")
+                ensure_db_initialized()
+        
+        # Log startup status
+        logger.info(f"Application started successfully in {settings.ENVIRONMENT} mode")
+        
+        # Audit log startup with detailed environment info
         audit_log(
             action="service_startup",
             user_id=None,
-            details=f"Service started in {settings.ENVIRONMENT} environment"
+            details={
+                "environment": settings.ENVIRONMENT,
+                "log_level": settings.LOG_LEVEL,
+                "api_auth_enabled": settings.API_KEY_AUTH_ENABLED,
+                "version": settings.VERSION
+            }
         )
+        
     except Exception as e:
-        logger.error(f"Failed to initialize application: {str(e)}")
+        logger.critical(f"Failed to initialize application: {str(e)}", exc_info=True)
         audit_log(
             action="service_startup",
             user_id=None,
-            details=f"Service startup failed: {str(e)}",
+            details={"error": str(e)},
             status="failure"
         )
         raise
@@ -61,12 +155,23 @@ async def lifespan(app: FastAPI):
     yield  # Server is running
     
     # Shutdown
-    logger.info("Application shutting down...")
-    audit_log(
-        action="service_shutdown",
-        user_id=None,
-        details="Service shutdown initiated"
-    )
+    logger.info("Initiating application shutdown...")
+    try:
+        # Perform cleanup tasks here if needed
+        audit_log(
+            action="service_shutdown",
+            user_id=None,
+            details={"shutdown_type": "graceful"}
+        )
+        logger.info("Application shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}", exc_info=True)
+        audit_log(
+            action="service_shutdown",
+            user_id=None,
+            details={"error": str(e)},
+            status="failure"
+        )
 
 # Initialize FastAPI app with lifespan
 app = FastAPI(
@@ -106,10 +211,24 @@ async def custom_rate_limit_handler(request, exc):
         
     window_reset = now + window_seconds
     
+    # Log rate limit violation with client info
+    security_logger.warning(
+        "Rate limit exceeded",
+        extra={
+            "client_ip": get_remote_address(request),
+            "path": request.url.path,
+            "reset_time": window_reset
+        }
+    )
+    
     audit_log(
         action="rate_limit_exceeded",
         user_id=None,
-        details=f"Rate limit exceeded for IP: {get_remote_address(request)}",
+        details={
+            "client_ip": get_remote_address(request),
+            "path": request.url.path,
+            "reset_time": window_reset
+        },
         status="failure"
     )
     
@@ -143,6 +262,7 @@ async def health_check():
         # Verify database connection using context manager
         with get_db_session() as db:
             db.execute(text("SELECT 1"))
+            db_logger.debug("Database health check successful")
         
         health_status = {
             "status": "healthy",
@@ -157,39 +277,50 @@ async def health_check():
             }
         }
         
+        # Log health check with detailed status in debug mode
+        logger.debug("Health check details", extra=health_status)
+        
         audit_log(
             action="health_check",
             user_id=None,
-            details="Health check successful"
+            details=health_status
         )
         
         return health_status
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
+        error_details = {
+            "status": "unhealthy",
+            "version": settings.VERSION,
+            "error": str(e)
+        }
+        
+        logger.error(
+            "Health check failed",
+            exc_info=True,
+            extra=error_details
+        )
         
         audit_log(
             action="health_check",
             user_id=None,
-            details=f"Health check failed: {str(e)}",
+            details=error_details,
             status="failure"
         )
         
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unhealthy",
-                "version": settings.VERSION,
-                "error": str(e)
-            }
+            content=error_details
         )
 
 if __name__ == "__main__":
     import uvicorn
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         reload=settings.ENVIRONMENT == "development",
         log_level=settings.LOG_LEVEL.lower(),
+        log_config=get_app_logging_config(),
         workers=1
     )

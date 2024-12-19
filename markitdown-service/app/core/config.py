@@ -1,9 +1,28 @@
 # app/core/config.py
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 from functools import lru_cache
+import logging
+
+class LoggingConfig:
+    """Logging configuration container"""
+    CRITICAL = 50
+    ERROR = 40
+    WARNING = 30
+    INFO = 20
+    DEBUG = 10
+    NOTSET = 0
+
+    LEVEL_MAP = {
+        "CRITICAL": CRITICAL,
+        "ERROR": ERROR,
+        "WARNING": WARNING,
+        "INFO": INFO,
+        "DEBUG": DEBUG,
+        "NOTSET": NOTSET,
+    }
 
 class Settings(BaseSettings):
     # Pydantic V2 configuration
@@ -37,8 +56,8 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting Settings
-    RATE_LIMIT_REQUESTS: int = 10     # Number of requests allowed per minute
-    RATE_LIMIT_PERIOD: str = "minute" # Rate limit period
+    RATE_LIMIT_REQUESTS: int = 10
+    RATE_LIMIT_PERIOD: str = "minute"
 
     # CORS Settings
     ALLOWED_ORIGINS: List[str] = ["*"]
@@ -60,7 +79,7 @@ class Settings(BaseSettings):
     API_KEY_HEADER_NAME: str = "X-API-Key"
     API_KEY_LENGTH: int = 32
     ADMIN_API_KEY: Optional[str] = os.getenv("ADMIN_API_KEY")
-    API_KEY_EXPIRATION_DAYS: Optional[int] = None  # None means no expiration
+    API_KEY_EXPIRATION_DAYS: Optional[int] = None
 
     # Initial Setup Settings
     INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@example.com")
@@ -73,35 +92,39 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 24
 
+    # Enhanced Logging Settings
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    LOG_DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
+    LOG_DIR: str = "logs"
+    LOG_FILE_PREFIX: str = "app"
+    LOG_FILE_SUFFIX: str = ".log"
+    LOG_ROTATION: str = "midnight"
+    LOG_BACKUP_COUNT: int = 7
+    LOG_ENCODING: str = "utf-8"
+
+    # Component-specific logging levels
+    COMPONENT_LOG_LEVELS: Dict[str, str] = {
+        "uvicorn": "INFO",
+        "uvicorn.error": "INFO",
+        "uvicorn.access": "INFO",
+        "sqlalchemy.engine": "WARNING",
+        "sqlalchemy.pool": "WARNING",
+        "sqlalchemy.dialects": "WARNING",
+        "sqlalchemy.orm": "WARNING",
+        "asyncio": "WARNING",
+        "fastapi": "INFO",
+        "app.api": "DEBUG",
+        "app.core": "INFO",
+        "app.db": "INFO",
+        "app.cli": "INFO",
+    }
+
     # Audit Log Settings
     AUDIT_LOG_ENABLED: bool = True
     AUDIT_LOG_FILE: str = f"logs/audit_{ENVIRONMENT}.log"
     AUDIT_LOG_RETENTION_DAYS: int = 90
-
-    # Logging configuration
-    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    LOG_FILE: str = f"logs/app_{ENVIRONMENT}.log"
-    LOG_ROTATION: str = "midnight"
-    LOG_BACKUP_COUNT: int = 7
-
-    @property
-    def LOG_LEVEL(self) -> str:
-        if self.ENVIRONMENT == "test":
-            return "WARNING"
-        elif self.ENVIRONMENT == "production":
-            return "INFO"
-        return "DEBUG"
-
-    # Database Connection Settings
-    @property
-    def DATABASE_SETTINGS(self) -> dict:
-        return {
-            "url": self.DATABASE_URL,
-            "connect_args": self.DATABASE_CONNECT_ARGS,
-            "pool_size": self.DATABASE_POOL_SIZE,
-            "pool_recycle": self.DATABASE_POOL_RECYCLE,
-            "echo": self.DATABASE_ECHO,
-        }
+    AUDIT_LOG_LEVEL: str = "INFO"  # Audit logs should typically stay at INFO
 
     # API Documentation Settings
     DOCS_URL: Optional[str] = "/docs" if ENVIRONMENT != "production" else None
@@ -112,11 +135,115 @@ class Settings(BaseSettings):
     CLI_COLORS: bool = True
     CLI_TABLE_STYLE: str = "rounded"
 
+    @property
+    def get_log_level(self) -> int:
+        """Get the numeric log level, with environment-specific defaults"""
+        env_levels = {
+            "development": "DEBUG",
+            "test": "WARNING",
+            "production": "INFO"
+        }
+        
+        # Use LOG_LEVEL from env, fall back to environment-specific default
+        level_name = self.LOG_LEVEL.upper() or env_levels.get(self.ENVIRONMENT, "INFO")
+        return LoggingConfig.LEVEL_MAP.get(level_name, LoggingConfig.INFO)
+
+    def get_component_log_level(self, component: str) -> int:
+        """Get log level for specific component"""
+        if component in self.COMPONENT_LOG_LEVELS:
+            return LoggingConfig.LEVEL_MAP.get(
+                self.COMPONENT_LOG_LEVELS[component].upper(),
+                self.get_log_level
+            )
+        return self.get_log_level
+
+    @property
+    def DATABASE_SETTINGS(self) -> dict:
+        """Get database connection settings"""
+        return {
+            "url": self.DATABASE_URL,
+            "connect_args": self.DATABASE_CONNECT_ARGS,
+            "pool_size": self.DATABASE_POOL_SIZE,
+            "pool_recycle": self.DATABASE_POOL_RECYCLE,
+            "echo": self.DATABASE_ECHO,
+        }
+
+    def get_logging_config(self) -> Dict[str, Any]:
+        """Generate complete logging configuration"""
+        return {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "format": self.LOG_FORMAT,
+                    "datefmt": self.LOG_DATE_FORMAT
+                },
+                "simple": {
+                    "format": "%(message)s"
+                },
+                "sqlalchemy": {
+                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                    "datefmt": self.LOG_DATE_FORMAT
+                }
+            },
+            "handlers": {
+                "console": {
+                    "class": "logging.StreamHandler",
+                    "formatter": "default",
+                    "level": self.get_log_level
+                },
+                "file": {
+                    "class": "logging.handlers.TimedRotatingFileHandler",
+                    "formatter": "default",
+                    "filename": f"{self.LOG_DIR}/{self.LOG_FILE_PREFIX}_{self.ENVIRONMENT}{self.LOG_FILE_SUFFIX}",
+                    "when": self.LOG_ROTATION,
+                    "backupCount": self.LOG_BACKUP_COUNT,
+                    "encoding": self.LOG_ENCODING
+                },
+                "sqlalchemy": {
+                    "class": "logging.StreamHandler",
+                    "formatter": "sqlalchemy",
+                    "level": "WARNING" if self.ENVIRONMENT != "development" else "INFO"
+                }
+            },
+            "loggers": {
+                # SQLAlchemy loggers
+                "sqlalchemy.engine": {
+                    "handlers": ["sqlalchemy"],
+                    "level": "WARNING" if self.ENVIRONMENT != "development" else "INFO",
+                    "propagate": False
+                },
+                "sqlalchemy.pool": {
+                    "handlers": ["sqlalchemy"],
+                    "level": "WARNING",
+                    "propagate": False
+                },
+                "sqlalchemy.dialects": {
+                    "handlers": ["sqlalchemy"],
+                    "level": "WARNING",
+                    "propagate": False
+                },
+                # Application loggers
+                **{
+                    name: {
+                        "level": self.get_component_log_level(name),
+                        "handlers": ["console", "file"],
+                        "propagate": False
+                    }
+                    for name in self.COMPONENT_LOG_LEVELS
+                },
+                # Root logger
+                "": {
+                    "level": self.get_log_level,
+                    "handlers": ["console", "file"],
+                    "propagate": True
+                }
+            }
+        }
+
 @lru_cache()
 def get_settings() -> Settings:
-    """
-    Get cached settings instance.
-    """
+    """Get cached settings instance."""
     return Settings()
 
 settings = get_settings()

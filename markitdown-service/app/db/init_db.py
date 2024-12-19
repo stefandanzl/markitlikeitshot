@@ -33,15 +33,22 @@ def init_db(db_session) -> None:
                     name=settings.INITIAL_ADMIN_NAME,
                     role=Role.ADMIN
                 )
-                logger.info("\n" + "="*60)
-                logger.info("INITIAL ADMIN API KEY CREATED")
-                logger.info("-"*60)
-                logger.info(f"Name: {api_key.name}")
-                logger.info(f"Key:  {api_key.key}")
-                logger.info(f"Role: {api_key.role}")
-                logger.info("-"*60)
-                logger.info("IMPORTANT: Save this key - it will not be shown again!")
-                logger.info("="*60 + "\n")
+                
+                # Print the admin key box directly to console
+                box = f"""
+============================================================
+INITIAL ADMIN API KEY CREATED
+------------------------------------------------------------
+Name: {api_key.name}
+Key:  {api_key.key}
+Role: {api_key.role}
+------------------------------------------------------------
+IMPORTANT: Save this key - it will not be shown again!
+============================================================
+"""
+                print(box)
+                
+                logger.info("Initial admin API key created successfully")
             else:
                 logger.info(f"Found existing admin key for: {existing_admin.name}")
                 logger.info("Skipping initial admin key creation")
@@ -49,7 +56,7 @@ def init_db(db_session) -> None:
         except Exception as e:
             logger.error(f"Failed to create initial admin API key: {e}")
             logger.exception("Detailed error:")
-            raise  # Re-raise the exception to ensure startup fails if we can't create admin key
+            raise
 
     logger.info("Database initialization completed successfully")
 
