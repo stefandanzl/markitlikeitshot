@@ -116,28 +116,42 @@ def list(
         console.print(f"[red]Error listing API keys: {str(e)}[/red]")
         raise typer.Exit(1)
 
+# app/cli/commands/api_key.py
 @app.command()
 def deactivate(
     key_id: int = typer.Argument(..., help="ID of the API key to deactivate"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")
 ):
-    """Deactivate an API key"""
+    """Deactivate an API key."""
     try:
-        if not force and not Confirm.ask(f"Are you sure you want to deactivate API key {key_id}?"):
-            raise typer.Abort()
-            
         with get_db_session() as db:
+            # Check if the key exists
             api_key = db.get(APIKey, key_id)
-            
             if not api_key:
-                console.print(f"[red]API key with ID {key_id} not found[/red]")
-                raise typer.Exit(1)
-                
+                console.print(f"[yellow]API key with ID {key_id} not found[/yellow]")
+                return  # Exit gracefully without raising an error
+            
+            # If key exists but is already inactive
+            if not api_key.is_active:
+                console.print(f"[yellow]API key '{api_key.name}' is already inactive[/yellow]")
+                return
+
+            if not force and not Confirm.ask(f"Are you sure you want to deactivate key {key_id}?"):
+                return
+
             api_key.is_active = False
+            db.commit()  # Commit the change
+            
+            # Audit logging
+            audit_log(
+                action="deactivate_api_key",
+                user_id=str(key_id),
+                details=f"Deactivated API key {api_key.name}"
+            )
             
             console.print(Panel(
-                f"Successfully deactivated API key: {api_key.name}",
-                style="green"
+                f"[green]Successfully deactivated API key: {api_key.name}[/green]",
+                border_style="green"
             ))
             
     except Exception as e:

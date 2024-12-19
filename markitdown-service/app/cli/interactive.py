@@ -77,7 +77,7 @@ def create_key_menu():
         )
         
         if Confirm.ask("[cyan]Create API key with these settings?[/cyan]"):
-            typer.echo()  # Add blank line for readability
+            typer.echo()
             api_key_commands.create(
                 name=name,
                 role=role,
@@ -107,7 +107,7 @@ def list_keys_menu():
             default="table"
         )
         
-        typer.echo()  # Add blank line for readability
+        typer.echo()
         api_key_commands.list(
             show_inactive=show_inactive,
             role=None if role_filter == "all" else role_filter,
@@ -125,7 +125,7 @@ def deactivate_key_menu():
             key_id = int(key_id_str)
             
             if Confirm.ask(f"[yellow]Are you sure you want to deactivate key {key_id}?[/yellow]"):
-                typer.echo()  # Add blank line for readability
+                typer.echo()
                 api_key_commands.deactivate(
                     key_id=key_id,
                     force=True  # Skip second confirmation
@@ -144,7 +144,7 @@ def reactivate_key_menu():
             key_id = int(key_id_str)
             
             if Confirm.ask(f"[yellow]Are you sure you want to reactivate key {key_id}?[/yellow]"):
-                typer.echo()  # Add blank line for readability
+                typer.echo()
                 api_key_commands.reactivate(
                     key_id=key_id,
                     force=True  # Skip second confirmation
@@ -161,7 +161,7 @@ def view_key_menu():
         key_id_str = Prompt.ask("[cyan]Enter API key ID to view[/cyan]")
         try:
             key_id = int(key_id_str)
-            typer.echo()  # Add blank line for readability
+            typer.echo()
             api_key_commands.info(key_id=key_id)
         except ValueError:
             console.print("[red]Invalid input: Please enter a valid number[/red]")
