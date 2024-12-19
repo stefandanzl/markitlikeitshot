@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
         details="Service shutdown initiated"
     )
 
-# Initialize FastAPI app with optional API key authentication and lifespan
+# Initialize FastAPI app with lifespan (no global API key dependency)
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -79,7 +79,6 @@ app = FastAPI(
     docs_url=settings.DOCS_URL,
     redoc_url=settings.REDOC_URL,
     openapi_url=settings.OPENAPI_URL,
-    dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None,
     lifespan=lifespan
 )
 
@@ -121,14 +120,15 @@ async def custom_rate_limit_handler(request, exc):
         }
     )
 
-# Include routers
+# Include routers with API key dependency
 app.include_router(
     conversion.router,
     prefix=settings.API_V1_STR,
-    tags=["conversion"]
+    tags=["conversion"],
+    dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
 )
 
-# Health check endpoint
+# Health check endpoint (no API key required)
 @app.get("/health", tags=["system"])
 async def health_check():
     """Check the health of the service."""
