@@ -4,6 +4,11 @@
 # Default values
 REBUILD=false
 DETACH=true  # Default to detached mode
+SHOW_LOGS=false
+FOLLOW_LOGS=false
+CLEAN=false
+CLEAN_ALL=false
+FORCE=false
 
 # Colors for better visibility
 RED='\033[0;31m'
@@ -46,13 +51,83 @@ docker_compose() {
     fi
 }
 
+# Function to show logs
+show_logs() {
+    local env=${1:-$ENVIRONMENT}  # Use passed environment or current one
+    local follow=${2:-false}      # Whether to follow logs
+    local service=""
+
+    case "$env" in
+        dev)  service="markitdown-dev" ;;
+        prod) service="markitdown-prod" ;;
+        test) service="markitdown-test" ;;
+        *)    
+            echo -e "${RED}Invalid environment: $env${NC}"
+            return 1
+            ;;
+    esac
+
+    if [ "$follow" = true ]; then
+        echo -e "${GREEN}Showing and following logs for $service...${NC}"
+        echo -e "${YELLOW}Press Ctrl+C to stop following${NC}"
+        docker_compose --profile $env logs -f $service
+    else
+        echo -e "${GREEN}Showing logs for $service...${NC}"
+        docker_compose --profile $env logs $service
+    fi
+}
+
 # Function to stop running containers
 stop_running_containers() {
     echo -e "${YELLOW}Stopping any running containers...${NC}"
+    docker_compose --profile test down --remove-orphans 2>/dev/null
     docker_compose --profile dev down --remove-orphans 2>/dev/null
     docker_compose --profile prod down --remove-orphans 2>/dev/null
-    docker_compose --profile test down --remove-orphans 2>/dev/null
     echo -e "${GREEN}Containers stopped.${NC}"
+}
+
+# Function to clean environment
+clean_environment() {
+    local env=$1
+    local force=${2:-false}
+
+    # Extra confirmation for production
+    if [ "$env" = "prod" ] && [ "$force" != true ]; then
+        echo -e "${RED}WARNING: You are about to completely clean the PRODUCTION environment!${NC}"
+        echo -e "${RED}This will delete all data, volumes, and containers.${NC}"
+        echo -e "${YELLOW}Type 'CONFIRM-PROD-CLEAN' to proceed:${NC}"
+        read -r confirmation
+        if [ "$confirmation" != "CONFIRM-PROD-CLEAN" ]; then
+            echo -e "${GREEN}Clean operation cancelled.${NC}"
+            return 1
+        fi
+    fi
+
+    echo -e "${YELLOW}Cleaning ${env} environment (including volumes)...${NC}"
+    docker_compose --profile test down -v 2>/dev/null
+    docker_compose --profile $env down -v
+    echo -e "${GREEN}Clean complete for ${env} environment.${NC}"
+}
+
+# Function to clean all environments
+clean_all() {
+    local force=${1:-false}
+    
+    echo -e "${RED}WARNING: This will clean ALL environments!${NC}"
+    if [ "$force" != true ]; then
+        echo -e "${YELLOW}Type 'CONFIRM-CLEAN-ALL' to proceed:${NC}"
+        read -r confirmation
+        if [ "$confirmation" != "CONFIRM-CLEAN-ALL" ]; then
+            echo -e "${GREEN}Clean operation cancelled.${NC}"
+            return 1
+        fi
+    fi
+
+    echo -e "${YELLOW}Cleaning all environments...${NC}"
+    docker_compose --profile test down -v
+    docker_compose --profile dev down -v
+    docker_compose --profile prod down -v
+    echo -e "${GREEN}All environments cleaned.${NC}"
 }
 
 # Function to display header
@@ -77,12 +152,27 @@ usage() {
     echo "  -r, --rebuild    Force rebuild of Docker images"
     echo "  -d, --detach     Run containers in detached mode (default: true)"
     echo "  -f, --foreground Run containers in foreground"
+    echo "  -l, --logs       Show logs for the environment"
+    echo "  -F, --follow     Show and follow logs for the environment"
+    echo "  -c, --clean      Clean environment (delete containers, volumes, etc.)"
+    echo "  -C, --clean-all  Clean all environments"
+    echo "  --force          Force clean without confirmation (dangerous!)"
     echo "  -h, --help       Display this help message"
     echo
     echo "Environments:"
     echo "  dev     Development environment with hot reload"
     echo "  prod    Production environment"
     echo "  test    Test environment"
+    echo
+    echo "Examples:"
+    echo "  $0 dev              # Start development environment"
+    echo "  $0 -r prod         # Rebuild and start production environment"
+    echo "  $0 -f test         # Start test environment in foreground"
+    echo "  $0 -l dev          # Show development logs"
+    echo "  $0 -F prod         # Follow production logs"
+    echo "  $0 -c dev          # Clean development environment"
+    echo "  $0 -C              # Clean all environments"
+    echo "  $0 -c prod         # Clean production (requires confirmation)"
 }
 
 # Function to select environment
@@ -222,6 +312,27 @@ main() {
                     DETACH=false
                     shift
                     ;;
+                -l|--logs)
+                    SHOW_LOGS=true
+                    shift
+                    ;;
+                -F|--follow)
+                    SHOW_LOGS=true
+                    FOLLOW_LOGS=true
+                    shift
+                    ;;
+                -c|--clean)
+                    CLEAN=true
+                    shift
+                    ;;
+                -C|--clean-all)
+                    CLEAN_ALL=true
+                    shift
+                    ;;
+                --force)
+                    FORCE=true
+                    shift
+                    ;;
                 -h|--help)
                     usage
                     exit 0
@@ -237,6 +348,27 @@ main() {
                     ;;
             esac
         done
+
+        # Handle cleaning operations
+        if [ "$CLEAN_ALL" = true ]; then
+            clean_all $FORCE
+            exit 0
+        fi
+
+        if [ "$CLEAN" = true ]; then
+            if [ -z "$ENVIRONMENT" ]; then
+                echo -e "${RED}Error: Environment must be specified for clean operation${NC}"
+                exit 1
+            fi
+            clean_environment $ENVIRONMENT $FORCE
+            exit 0
+        fi
+
+        # If showing logs, do that and exit
+        if [ "$SHOW_LOGS" = true ]; then
+            show_logs "$ENVIRONMENT" "$FOLLOW_LOGS"
+            exit 0
+        fi
     else
         # Interactive mode
         select_environment
@@ -285,6 +417,13 @@ main() {
             fi
             ;;
     esac
+
+    # If we started in detached mode, show how to view logs
+    if [ "$DETACH" = true ]; then
+        echo -e "\n${GREEN}Container started in detached mode.${NC}"
+        echo -e "To view logs, run: ${YELLOW}$0 -l $ENVIRONMENT${NC}"
+        echo -e "To follow logs, run: ${YELLOW}$0 -F $ENVIRONMENT${NC}"
+    fi
 }
 
 # Start the script

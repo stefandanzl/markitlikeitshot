@@ -11,7 +11,7 @@ def init_db(db_session) -> None:
     """Initialize the database."""
     engine = get_engine()
     logger.info("Creating database tables...")
-    SQLModel.metadata.create_all(engine)
+    SQLModel.metadata.create_all(engine, checkfirst=True)
     logger.info("Database tables created successfully")
 
     # Create initial admin API key if enabled
@@ -34,7 +34,7 @@ def init_db(db_session) -> None:
                     role=Role.ADMIN
                 )
                 
-                # Print the admin key box directly to console
+                # Log the admin key box using logger
                 box = f"""
 ============================================================
 INITIAL ADMIN API KEY CREATED
@@ -44,9 +44,8 @@ Key:  {api_key.key}
 Role: {api_key.role}
 ------------------------------------------------------------
 IMPORTANT: Save this key - it will not be shown again!
-============================================================
-"""
-                print(box)
+============================================================"""
+                logger.info("\n" + box)  # Use logger instead of print
                 
                 logger.info("Initial admin API key created successfully")
             else:

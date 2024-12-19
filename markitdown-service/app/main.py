@@ -32,12 +32,15 @@ def get_app_logging_config() -> dict:
             },
             "simple": {
                 "format": "%(message)s"
+            },
+            "worker": {
+                "format": "worker[%(process)d] - %(message)s"
             }
         },
         "handlers": {
             "console": {
                 "class": "logging.StreamHandler",
-                "formatter": "simple",
+                "formatter": "worker",
                 "level": "INFO"
             },
             "file": {
@@ -109,23 +112,9 @@ async def lifespan(app: FastAPI):
         logger.debug(f"API Key Auth: {settings.API_KEY_AUTH_ENABLED}")
         logger.debug(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
         
-        # Check database state
-        db_file = os.path.join("data", "api_keys.db")
-        if not os.path.exists(db_file):
-            logger.info("Database file not found. Performing initial setup...")
-            ensure_db_initialized()
-        else:
-            logger.info("Database file found. Verifying database state...")
-            try:
-                # Verify database connection and structure
-                with get_db_session() as db:
-                    # Test query to verify database structure
-                    result = db.execute(text("SELECT COUNT(*) FROM api_keys")).scalar()
-                    logger.info(f"Database verification successful. Found {result} API keys.")
-            except Exception as db_error:
-                logger.error(f"Database verification failed: {str(db_error)}")
-                logger.info("Attempting database recovery...")
-                ensure_db_initialized()
+        # Initialize database
+        logger.info("Initializing database...")
+        ensure_db_initialized()
         
         # Log startup status
         logger.info(f"Application started successfully in {settings.ENVIRONMENT} mode")
