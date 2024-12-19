@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
+from app.core.config import settings
 
 app = typer.Typer(
     help="MarkItDown API Management CLI",
@@ -25,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 def setup_logging():
     """Configure logging for the CLI"""
-    from app.core.config import settings
-    
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
@@ -40,6 +39,42 @@ def setup_logging():
             logging.StreamHandler()
         ]
     )
+
+def setup_shell_logging():
+    """Configure quieter logging for shell sessions"""
+    # Set SQLAlchemy loggers to WARNING level
+    logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.dialects').setLevel(logging.WARNING)
+    logging.getLogger('sqlalchemy.orm').setLevel(logging.WARNING)
+    
+    # Set asyncio logger to WARNING
+    logging.getLogger('asyncio').setLevel(logging.WARNING)
+    
+    # Keep audit logging at INFO
+    logging.getLogger('audit').setLevel(logging.INFO)
+    
+    # Set root logger to WARNING
+    logging.getLogger().setLevel(logging.WARNING)
+
+def display_version_info():
+    """Display version information in a table."""
+    table = Table(show_header=False)
+    table.add_column("Component", style="cyan")
+    table.add_column("Value", style="green")
+    
+    table.add_row("Version", settings.VERSION)
+    table.add_row("Environment", settings.ENVIRONMENT)
+    table.add_row("API Auth Enabled", str(settings.API_KEY_AUTH_ENABLED))
+    table.add_row("Database URL", settings.DATABASE_URL)
+    table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
+    table.add_row("Max File Size", f"{settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
+    
+    console.print(Panel(
+        table,
+        title="MarkItDown Service Information",
+        border_style="blue"
+    ))
 
 @app.callback()
 def callback():
@@ -107,8 +142,10 @@ def shell(
 ):
     """Launch an interactive shell with pre-loaded context."""
     try:
+        # Set up quieter logging for shell session
+        setup_shell_logging()
+        
         # Import commonly needed objects
-        from app.core.config import settings
         from app.models.auth.api_key import APIKey, Role
         from app.core.security.api_key import create_api_key
         from sqlmodel import select
@@ -156,24 +193,7 @@ Example usage:
 @app.command()
 def version():
     """Display version information."""
-    from app.core.config import settings
-    
-    table = Table(show_header=False)
-    table.add_column("Component", style="cyan")
-    table.add_column("Value", style="green")
-    
-    table.add_row("Version", settings.VERSION)
-    table.add_row("Environment", settings.ENVIRONMENT)
-    table.add_row("API Auth Enabled", str(settings.API_KEY_AUTH_ENABLED))
-    table.add_row("Database URL", settings.DATABASE_URL)
-    table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
-    table.add_row("Max File Size", f"{settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
-    
-    console.print(Panel(
-        table,
-        title="MarkItDown Service Information",
-        border_style="blue"
-    ))
+    display_version_info()
 
 @app.command()
 def check(
@@ -184,8 +204,6 @@ def check(
     )
 ):
     """Check system configuration and dependencies."""
-    from app.core.config import settings
-    
     with console.status("[bold blue]Checking system...") as status:
         checks = []
         
@@ -286,7 +304,6 @@ def clean(
             # Clean old logs
             log_dir = Path("logs")
             if log_dir.exists():
-                from app.core.config import settings
                 from datetime import timedelta
                 
                 retention = timedelta(days=settings.AUDIT_LOG_RETENTION_DAYS)
@@ -310,6 +327,12 @@ def clean(
         console.print(f"[red]Error during cleanup: {str(e)}[/red]")
         logger.exception("Cleanup failed")
         raise typer.Exit(1)
+
+@app.command()
+def interactive():
+    """Launch interactive API key management interface."""
+    from app.cli.interactive import interactive_menu
+    interactive_menu()
 
 if __name__ == "__main__":
     app()

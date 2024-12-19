@@ -176,26 +176,3 @@ def require_admin(api_key: APIKey = Depends(get_api_key)):
             detail="Admin access required"
         )
     return api_key
-
-def rotate_api_key(db: Session, key_id: int, rotated_by: Optional[int] = None) -> Optional[APIKey]:
-    """
-    Rotate (replace) an existing API key while maintaining its settings.
-    Returns the updated API key or None if not found.
-    """
-    api_key = db.get(APIKey, key_id)
-    if api_key:
-        new_key = generate_api_key()
-        api_key.key = hash_api_key(new_key)
-        db.commit()
-        
-        # Audit logging
-        audit_log(
-            action="rotate_api_key",
-            user_id=str(rotated_by),
-            details=f"Rotated API key for {api_key.name}"
-        )
-        
-        # Return the new key (will only be shown once)
-        api_key.key = new_key
-        return api_key
-    return None
