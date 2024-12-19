@@ -12,15 +12,11 @@ from contextlib import contextmanager
 from app.core.config import settings
 from app.core.security.api_key import get_api_key, require_admin
 from app.utils.audit import audit_log
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.core.rate_limit import limiter  # Import shared limiter instance
 from slowapi.errors import RateLimitExceeded
 
 # Initialize router
 router = APIRouter(tags=["conversion"])
-
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
 
 # Custom exceptions
 class FileProcessingError(Exception):
@@ -98,10 +94,14 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
 
 def get_rate_limit_headers(request: Request) -> dict:
     """Get rate limit headers from request state"""
+    now = int(time.time())
+    window_reset = now + 60  # One minute in seconds
+    
     return {
         "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
         "X-RateLimit-Remaining": str(getattr(request.state, "view_rate_limit_remaining", 0)),
-        "X-RateLimit-Reset": str(getattr(request.state, "view_rate_limit_reset", 0))
+        "X-RateLimit-Reset": str(window_reset),
+        "Retry-After": "60"  # One minute in seconds
     }
 
 @contextmanager
@@ -126,7 +126,7 @@ def error_handler():
         )
 
 @router.post("/convert/text", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 async def convert_text(
     request: Request,
     text_input: TextInput,
@@ -150,7 +150,7 @@ async def convert_text(
             return RateLimitedResponse(content=markdown_content, headers=headers)
 
 @router.post("/convert/file", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 async def convert_file(
     request: Request,
     file: UploadFile = File(...),
@@ -180,7 +180,7 @@ async def convert_file(
             return RateLimitedResponse(content=markdown_content, headers=headers)
 
 @router.post("/convert/url", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 async def convert_url(
     request: Request,
     url_input: UrlInput,

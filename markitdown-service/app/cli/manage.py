@@ -166,7 +166,7 @@ def version():
     table.add_row("Environment", settings.ENVIRONMENT)
     table.add_row("API Auth Enabled", str(settings.API_KEY_AUTH_ENABLED))
     table.add_row("Database URL", settings.DATABASE_URL)
-    table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_WINDOW}s")
+    table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
     table.add_row("Max File Size", f"{settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
     
     console.print(Panel(

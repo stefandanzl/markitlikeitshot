@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting Settings
-    RATE_LIMIT_REQUESTS: int = 10
-    RATE_LIMIT_WINDOW: int = 60
+    RATE_LIMIT_REQUESTS: int = 10     # Number of requests allowed per minute
+    RATE_LIMIT_PERIOD: str = "minute" # Rate limit period
 
     # CORS Settings
     ALLOWED_ORIGINS: List[str] = ["*"]

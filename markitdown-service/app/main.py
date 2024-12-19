@@ -5,8 +5,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
@@ -17,6 +15,7 @@ from app.core.config import settings
 from app.db.init_db import init_db
 from app.db.session import get_db
 from app.utils.audit import audit_log
+from app.core.rate_limit import limiter
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -24,9 +23,6 @@ logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL),
     format=settings.LOG_FORMAT
 )
-
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,7 +40,7 @@ async def lifespan(app: FastAPI):
         # Log startup configuration
         logger.info(f"Environment: {settings.ENVIRONMENT}")
         logger.info(f"API Key Auth Enabled: {settings.API_KEY_AUTH_ENABLED}")
-        logger.info(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_WINDOW} seconds")
+        logger.info(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
         
         # Audit log startup
         audit_log(
@@ -100,6 +96,16 @@ app.add_middleware(
 @app.exception_handler(RateLimitExceeded)
 async def custom_rate_limit_handler(request, exc):
     """Handle rate limit exceeded exceptions."""
+    now = int(time.time())
+    if settings.RATE_LIMIT_PERIOD == "minute":
+        window_seconds = 60
+    elif settings.RATE_LIMIT_PERIOD == "hour":
+        window_seconds = 3600
+    else:
+        window_seconds = 60  # Default to minute if unknown period
+        
+    window_reset = now + window_seconds
+    
     audit_log(
         action="rate_limit_exceeded",
         user_id=None,
@@ -116,8 +122,8 @@ async def custom_rate_limit_handler(request, exc):
         headers={
             "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
             "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(int(time.time() + settings.RATE_LIMIT_WINDOW)),
-            "Retry-After": str(settings.RATE_LIMIT_WINDOW)
+            "X-RateLimit-Reset": str(window_reset),
+            "Retry-After": str(window_seconds)
         }
     )
 
@@ -147,7 +153,7 @@ async def health_check():
             "database": "connected",
             "rate_limit": {
                 "requests": settings.RATE_LIMIT_REQUESTS,
-                "window": settings.RATE_LIMIT_WINDOW
+                "period": settings.RATE_LIMIT_PERIOD
             }
         }
         

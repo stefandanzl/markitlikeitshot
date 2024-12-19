@@ -12,7 +12,7 @@ services:
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=sqlite:///./data/api_keys.db
-      - API_KEY_AUTH_ENABLED=true
+      - API_KEY_AUTH_ENABLED=false
       - SECRET_KEY=${SECRET_KEY:-default-secret-key-change-in-production}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-admin-key-change-in-production}
       - LOG_LEVEL=DEBUG
