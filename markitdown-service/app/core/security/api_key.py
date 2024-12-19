@@ -1,5 +1,6 @@
 from datetime import datetime
 import secrets
+import bcrypt
 from typing import Optional
 from fastapi import Security, HTTPException, Depends
 from fastapi.security.api_key import APIKeyHeader
@@ -10,7 +11,6 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.utils.audit import audit_log
 import logging
-from passlib.hash import bcrypt
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +23,15 @@ def generate_api_key() -> str:
 
 def hash_api_key(key: str) -> str:
     """Hash an API key for storage."""
-    return bcrypt.hash(key)
+    key_bytes = key.encode('utf-8')
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(key_bytes, salt).decode('utf-8')
 
 def verify_key_hash(key: str, hashed_key: str) -> bool:
     """Verify an API key against its hash."""
-    return bcrypt.verify(key, hashed_key)
+    key_bytes = key.encode('utf-8')
+    hashed_key_bytes = hashed_key.encode('utf-8')
+    return bcrypt.checkpw(key_bytes, hashed_key_bytes)
 
 def create_api_key(
     db: Session,

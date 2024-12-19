@@ -15,7 +15,6 @@ pytest-cov
 sqlmodel
 typer[all]
 rich
-passlib[bcrypt]
 python-jose[cryptography]
 ipython
 bcrypt
