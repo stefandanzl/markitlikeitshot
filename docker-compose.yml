@@ -6,9 +6,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./markitdown-service/app:/app/app
-      - ./markitdown-service/data:/app/data
-      - ./markitdown-service/logs:/app/logs
+      - ./markitdown-service/app:/app/app  # Keep this for development hot reload
+      - markitdown_data:/app/data
+      - markitdown_logs:/app/logs
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=sqlite:///./data/api_keys.db
@@ -17,7 +17,7 @@ services:
       - ADMIN_API_KEY=${ADMIN_API_KEY:-admin-key-change-in-production}
       - LOG_LEVEL=DEBUG
     command: >
-      sh -c "python -m app.db.init_db &&
+      sh -c "python manage.py init --yes &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -31,9 +31,9 @@ services:
       context: ./markitdown-service
       dockerfile: Dockerfile
     volumes:
-      - ./markitdown-service:/app
-      - ./markitdown-service/data:/app/data
-      - ./markitdown-service/logs:/app/logs
+      - ./markitdown-service/app:/app/app
+      - test_data:/app/data
+      - test_logs:/app/logs
     environment:
       - ENVIRONMENT=test
       - PYTHONPATH=/app
@@ -51,10 +51,14 @@ services:
       - test
 
 volumes:
-  data:
-    driver: local
-  logs:
-    driver: local
+  markitdown_data:
+    name: markitdown_data
+  markitdown_logs:
+    name: markitdown_logs
+  test_data:
+    name: markitdown_test_data
+  test_logs:
+    name: markitdown_test_logs
 
 networks:
   default:
