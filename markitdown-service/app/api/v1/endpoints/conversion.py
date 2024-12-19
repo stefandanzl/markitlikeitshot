@@ -14,6 +14,7 @@ from app.core.security.api_key import get_api_key, require_admin
 from app.utils.audit import audit_log
 from app.core.rate_limit import limiter  # Import shared limiter instance
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 # Initialize router
 router = APIRouter(tags=["conversion"])
@@ -95,13 +96,20 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
 def get_rate_limit_headers(request: Request) -> dict:
     """Get rate limit headers from request state"""
     now = int(time.time())
-    window_reset = now + 60  # One minute in seconds
+    if settings.RATE_LIMIT_PERIOD == "minute":
+        window_seconds = 60
+    elif settings.RATE_LIMIT_PERIOD == "hour":
+        window_seconds = 3600
+    else:
+        window_seconds = 60  # Default to minute if unknown period
+        
+    window_reset = now + window_seconds
     
     return {
         "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
         "X-RateLimit-Remaining": str(getattr(request.state, "view_rate_limit_remaining", 0)),
         "X-RateLimit-Reset": str(window_reset),
-        "Retry-After": "60"  # One minute in seconds
+        "Retry-After": str(window_seconds)
     }
 
 @contextmanager

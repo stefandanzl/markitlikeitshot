@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address  # Added import
 from sqlalchemy import text
 
 from app.api.v1.endpoints import conversion
