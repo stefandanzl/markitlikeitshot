@@ -1,3 +1,4 @@
+# app/cli/manage.py
 import typer
 from app.cli.commands import api_key
 from app.db.init_db import init_db
@@ -6,14 +7,15 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.prompt import Confirm
-from typing import Optional, Dict
+from typing import Optional
 import IPython
 import logging
 import logging.config
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from app.core.config import settings
+from app.core.logging import get_cli_logging_config
 
 app = typer.Typer(
     help="MarkItDown API Management CLI",
@@ -26,77 +28,6 @@ console = Console()
 logger = logging.getLogger(__name__)
 cli_logger = logging.getLogger("app.cli")
 db_logger = logging.getLogger("app.db")
-
-def get_cli_logging_config(quiet: bool = False) -> Dict:
-    """Get CLI-specific logging configuration."""
-    log_dir = Path(settings.LOG_DIR)
-    log_dir.mkdir(exist_ok=True)
-    
-    cli_log_file = log_dir / f"cli_{datetime.now().strftime('%Y%m%d')}.log"
-    sql_log_file = log_dir / f"sql_{datetime.now().strftime('%Y%m%d')}.log"
-    
-    return {
-        "version": 1,
-        "disable_existing_loggers": True,
-        "formatters": {
-            "cli": {
-                "format": "%(levelname)s: %(message)s" if not quiet else "%(message)s"
-            },
-            "detailed": {
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "datefmt": "%Y-%m-%d %H:%M:%S"
-            }
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "cli",
-                "level": "DEBUG" if settings.ENVIRONMENT == "development" else "INFO"
-            },
-            "file": {
-                "class": "logging.FileHandler",
-                "filename": str(cli_log_file),
-                "formatter": "detailed",
-                "level": "DEBUG"
-            },
-            "sql_file": {
-                "class": "logging.FileHandler",
-                "filename": str(sql_log_file),
-                "formatter": "detailed",
-                "level": "DEBUG"
-            },
-            "null": {
-                "class": "logging.NullHandler"
-            }
-        },
-        "loggers": {
-            "app.cli": {
-                "handlers": ["console", "file"],
-                "level": "DEBUG",
-                "propagate": False
-            },
-            "app.db": {
-                "handlers": ["console", "file"],
-                "level": "DEBUG",
-                "propagate": False
-            },
-            "sqlalchemy": {
-                "handlers": ["sql_file"],
-                "level": "INFO",
-                "propagate": False
-            },
-            "sqlalchemy.engine": {
-                "handlers": ["sql_file"],
-                "level": "INFO",
-                "propagate": False
-            },
-            "": {
-                "handlers": ["console"],
-                "level": "INFO",
-                "propagate": False
-            }
-        }
-    }
 
 def setup_logging(quiet: bool = False):
     """
@@ -251,7 +182,7 @@ def shell(
                 'db': db,
                 'console': console,
                 'get_db_session': get_db_session,
-                'logger': cli_logger  # Add logger to context
+                'logger': cli_logger
             }
             
             banner = "" if quiet else f"""
@@ -425,8 +356,6 @@ def clean(
             # Clean old logs
             log_dir = Path("logs")
             if log_dir.exists():
-                from datetime import timedelta
-                
                 retention = timedelta(days=settings.AUDIT_LOG_RETENTION_DAYS)
                 cutoff = datetime.now() - retention
                 

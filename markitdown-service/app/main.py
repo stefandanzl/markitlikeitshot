@@ -19,75 +19,11 @@ from app.db.init_db import ensure_db_initialized
 from app.db.session import get_db, get_db_session
 from app.utils.audit import audit_log
 from app.core.rate_limit import limiter
-
-def get_app_logging_config() -> dict:
-    """Get application-specific logging configuration."""
-    return {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "default": {
-                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-                "datefmt": "%Y-%m-%d %H:%M:%S"
-            },
-            "simple": {
-                "format": "%(message)s"
-            },
-            "worker": {
-                "format": "worker[%(process)d] - %(message)s"
-            }
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "worker",
-                "level": "INFO"
-            },
-            "file": {
-                "class": "logging.handlers.TimedRotatingFileHandler",
-                "formatter": "default",
-                "filename": f"{settings.LOG_DIR}/app_{settings.ENVIRONMENT}.log",
-                "when": settings.LOG_ROTATION,
-                "backupCount": settings.LOG_BACKUP_COUNT,
-                "encoding": settings.LOG_ENCODING,
-                "level": "DEBUG"
-            },
-            "null": {
-                "class": "logging.NullHandler"
-            }
-        },
-        "loggers": {
-            "app": {
-                "handlers": ["console", "file"],
-                "level": "DEBUG",
-                "propagate": False
-            },
-            "sqlalchemy": {
-                "handlers": ["file"],
-                "level": "INFO",
-                "propagate": False
-            },
-            "uvicorn": {
-                "handlers": ["console"],
-                "level": "INFO",
-                "propagate": False
-            },
-            "uvicorn.error": {
-                "handlers": ["console"],
-                "level": "INFO",
-                "propagate": False
-            },
-            "uvicorn.access": {
-                "handlers": ["null"],
-                "level": "WARNING",
-                "propagate": False
-            }
-        }
-    }
+from app.core.logging import get_web_logging_config
 
 # Initialize logging
 os.makedirs(settings.LOG_DIR, exist_ok=True)
-logging.config.dictConfig(get_app_logging_config())
+logging.config.dictConfig(get_web_logging_config())
 
 # Create module-specific loggers
 logger = logging.getLogger(__name__)
@@ -310,6 +246,6 @@ if __name__ == "__main__":
         port=8000,
         reload=settings.ENVIRONMENT == "development",
         log_level=settings.LOG_LEVEL.lower(),
-        log_config=get_app_logging_config(),
+        log_config=get_web_logging_config(),
         workers=1
     )

@@ -52,13 +52,23 @@ def log_conversion_attempt(
     user_id: Optional[str] = None
 ) -> None:
     """Log conversion attempt with metadata."""
+    # Create a new dict for logging to avoid modifying the original metadata
+    log_data = {
+        "conversion_type": conversion_type,
+        "user_id": user_id,
+    }
+    
+    # Add metadata with safe key names
+    for key, value in metadata.items():
+        # Avoid using reserved logging field names
+        if key == 'filename':
+            log_data['input_filename'] = value  # Rename to avoid conflict
+        else:
+            log_data[key] = value
+
     logger.info(
         f"{conversion_type} conversion initiated",
-        extra={
-            "conversion_type": conversion_type,
-            "user_id": user_id,
-            **metadata
-        }
+        extra=log_data
     )
 
 def log_conversion_result(
@@ -69,12 +79,20 @@ def log_conversion_result(
     error: Optional[Exception] = None
 ) -> None:
     """Log conversion result with performance metrics."""
+    # Create safe log data
     log_data = {
         "conversion_type": conversion_type,
         "success": success,
         "duration_ms": round(duration * 1000, 2),
-        **metadata
     }
+
+    # Add metadata with safe key names
+    for key, value in metadata.items():
+        # Avoid using reserved logging field names
+        if key == 'filename':
+            log_data['input_filename'] = value
+        else:
+            log_data[key] = value
 
     if error:
         log_data["error"] = str(error)
