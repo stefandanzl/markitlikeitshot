@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager
 from app.core.config import settings
 from app.core.security.api_key import get_api_key, require_admin
+from app.core.error_handlers import handle_api_operation, OperationError
 from app.utils.audit import audit_log
 from app.core.rate_limit import limiter
 from slowapi.errors import RateLimitExceeded
@@ -262,173 +263,106 @@ def error_handler():
 
 @router.post("/convert/text", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
+@handle_api_operation(
+    "convert_text",
+    error_map={
+        FileProcessingError: (400, "File processing failed"),
+        ConversionError: (422, "Conversion failed"),
+        requests.RequestException: (502, "Request failed"),
+        Exception: (500, "Internal server error")
+    }
+)
 async def convert_text(
     request: Request,
     text_input: TextInput,
     api_key: str = Depends(get_api_key)
 ):
     """Convert text or HTML to markdown."""
-    start_time = time.time()
     conversion_metadata = {
         "content_length": len(text_input.content),
         "has_options": bool(text_input.options)
     }
     
-    log_conversion_attempt("text", conversion_metadata, getattr(api_key, 'id', None))
-
-    with error_handler():
-        logger.debug(
-            "Processing text conversion",
-            extra={
-                "content_preview": text_input.content[:100],
-                **conversion_metadata
-            }
-        )
-        
-        # Audit log the conversion attempt
-        audit_log(
-            action="convert_text",
-            user_id=getattr(api_key, 'id', None),
-            details={
-                "content_length": len(text_input.content),
-                "options": text_input.options
-            }
-        )
-        
-        with save_temp_file(text_input.content.encode('utf-8'), suffix='.html') as temp_file_path:
-            markdown_content = process_conversion(temp_file_path, '.html')
-            headers = get_rate_limit_headers(request)
-            
-            duration = time.time() - start_time
-            log_conversion_result(
-                "text",
-                True,
-                duration,
-                {**conversion_metadata, "output_length": len(markdown_content)}
-            )
-            
-            return RateLimitedResponse(content=markdown_content, headers=headers)
+    # Process the conversion
+    with save_temp_file(text_input.content.encode('utf-8'), suffix='.html') as temp_file_path:
+        markdown_content = process_conversion(temp_file_path, '.html')
+        headers = get_rate_limit_headers(request)
+        return RateLimitedResponse(content=markdown_content, headers=headers)
 
 @router.post("/convert/file", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
+@handle_api_operation(
+    "convert_file",
+    error_map={
+        FileProcessingError: (400, "File processing failed"),
+        ConversionError: (422, "Conversion failed"),
+        requests.RequestException: (502, "Request failed"),
+        Exception: (500, "Internal server error")
+    }
+)
 async def convert_file(
     request: Request,
     file: UploadFile = File(...),
     api_key: str = Depends(get_api_key)
 ):
     """Convert an uploaded file to markdown."""
-    start_time = time.time()
+    # Extract file information
     _, ext = os.path.splitext(file.filename)
     
-    conversion_metadata = {
-        "filename": file.filename,
-        "content_type": file.content_type,
-        "extension": ext
-    }
+    # Validate file extension
+    if ext.lower() not in settings.SUPPORTED_EXTENSIONS:
+        raise FileProcessingError(f"Unsupported file type: {ext}")
+
+    # Read file content
+    content = await file.read()
     
-    log_conversion_attempt("file", conversion_metadata, getattr(api_key, 'id', None))
+    # Check file size
+    if len(content) > settings.MAX_FILE_SIZE:
+        raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
 
-    with error_handler():
-        if ext.lower() not in settings.SUPPORTED_EXTENSIONS:
-            logger.warning(
-                "Unsupported file type",
-                extra={
-                    "extension": ext,
-                    "supported_extensions": settings.SUPPORTED_EXTENSIONS
-                }
-            )
-            raise FileProcessingError(f"Unsupported file type: {ext}")
-
-        content = await file.read()
-        conversion_metadata["content_length"] = len(content)
-        
-        # Audit log the file conversion attempt
-        audit_log(
-            action="convert_file",
-            user_id=getattr(api_key, 'id', None),
-            details=conversion_metadata
+    # Process the conversion
+    with save_temp_file(content, suffix=ext) as temp_file_path:
+        markdown_content = process_conversion(
+            temp_file_path,
+            ext,
+            content_type=file.content_type
         )
-        
-        if len(content) > settings.MAX_FILE_SIZE:
-            raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
-
-        with save_temp_file(content, suffix=ext) as temp_file_path:
-            markdown_content = process_conversion(
-                temp_file_path,
-                ext,
-                content_type=file.content_type
-            )
-            headers = get_rate_limit_headers(request)
-            
-            duration = time.time() - start_time
-            log_conversion_result(
-                "file",
-                True,
-                duration,
-                {**conversion_metadata, "output_length": len(markdown_content)}
-            )
-            
-            return RateLimitedResponse(content=markdown_content, headers=headers)
+        headers = get_rate_limit_headers(request)
+        return RateLimitedResponse(content=markdown_content, headers=headers)
 
 @router.post("/convert/url", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
+@handle_api_operation(
+    "convert_url",
+    error_map={
+        FileProcessingError: (400, "File processing failed"),
+        ConversionError: (422, "Conversion failed"),
+        requests.RequestException: (502, "Request fetch failed"),
+        Exception: (500, "Internal server error")
+    }
+)
 async def convert_url(
     request: Request,
     url_input: UrlInput,
     api_key: str = Depends(get_api_key)
 ):
     """Fetch a URL and convert its content to markdown."""
-    start_time = time.time()
-    conversion_metadata = {
-        "url": str(url_input.url),
-        "has_options": bool(url_input.options)
-    }
+    # Fetch URL content
+    headers = {'User-Agent': settings.USER_AGENT}
+    response = requests.get(
+        str(url_input.url), 
+        headers=headers, 
+        timeout=settings.REQUEST_TIMEOUT
+    )
+    response.raise_for_status()
     
-    log_conversion_attempt("url", conversion_metadata, getattr(api_key, 'id', None))
-
-    with error_handler():
-        logger.debug(
-            "Fetching URL content",
-            extra=conversion_metadata
+    # Process the conversion
+    content = response.content
+    with save_temp_file(content, suffix='.html') as temp_file_path:
+        markdown_content = process_conversion(
+            temp_file_path,
+            '.html',
+            url=str(url_input.url)
         )
-        
-        # Audit log the URL conversion attempt
-        audit_log(
-            action="convert_url",
-            user_id=getattr(api_key, 'id', None),
-            details=conversion_metadata
-        )
-        
-        headers = {'User-Agent': settings.USER_AGENT}
-        
-        response = requests.get(
-            str(url_input.url), 
-            headers=headers, 
-            timeout=settings.REQUEST_TIMEOUT
-        )
-        response.raise_for_status()
-        
-        conversion_metadata.update({
-            "status_code": response.status_code,
-            "content_type": response.headers.get("content-type"),
-            "content_length": len(response.content)
-        })
-        
-        content = response.content
-        with save_temp_file(content, suffix='.html') as temp_file_path:
-            markdown_content = process_conversion(
-                temp_file_path,
-                '.html',
-                url=str(url_input.url)
-            )
-            headers = get_rate_limit_headers(request)
-            
-            duration = time.time() - start_time
-            log_conversion_result(
-                "url",
-                True,
-                duration,
-                {**conversion_metadata, "output_length": len(markdown_content)}
-            )
-            
-            return RateLimitedResponse(content=markdown_content, headers=headers)
+        headers = get_rate_limit_headers(request)
+        return RateLimitedResponse(content=markdown_content, headers=headers)

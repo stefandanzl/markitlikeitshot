@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 import secrets
 import bcrypt
 from typing import Optional
@@ -99,8 +99,8 @@ def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
         
         for api_key in api_keys:
             if verify_key_hash(key, api_key.key):
-                api_key.last_used = datetime.utcnow()
-                db.flush()  # Ensure last_used is updated
+                api_key.last_used = datetime.now(UTC)
+                db.flush()
                 
                 # Audit logging
                 audit_log(
