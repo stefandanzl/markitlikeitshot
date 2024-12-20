@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, status, Request, Depends
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, Dict, Any
 from markitdown import MarkItDown
@@ -11,12 +11,9 @@ import requests
 import time
 from contextlib import contextmanager
 from app.core.config import settings
-from app.core.security.api_key import get_api_key, require_admin
-from app.core.error_handlers import handle_api_operation, OperationError
-from app.utils.audit import audit_log
+from app.core.security.api_key import get_api_key
+from app.core.error_handlers import handle_api_operation, handle_url_operation
 from app.core.rate_limit import limiter
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 # Initialize router
 router = APIRouter(tags=["conversion"])
@@ -332,15 +329,7 @@ async def convert_file(
 
 @router.post("/convert/url", response_class=RateLimitedResponse)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
-@handle_api_operation(
-    "convert_url",
-    error_map={
-        FileProcessingError: (400, "File processing failed"),
-        ConversionError: (422, "Conversion failed"),
-        requests.RequestException: (502, "Request fetch failed"),
-        Exception: (500, "Internal server error")
-    }
-)
+@handle_url_operation("convert_url")
 async def convert_url(
     request: Request,
     url_input: UrlInput,
@@ -348,21 +337,21 @@ async def convert_url(
 ):
     """Fetch a URL and convert its content to markdown."""
     # Fetch URL content
-    headers = {'User-Agent': settings.USER_AGENT}
     response = requests.get(
         str(url_input.url), 
-        headers=headers, 
+        headers={'User-Agent': settings.USER_AGENT}, 
         timeout=settings.REQUEST_TIMEOUT
     )
     response.raise_for_status()
     
     # Process the conversion
-    content = response.content
-    with save_temp_file(content, suffix='.html') as temp_file_path:
+    with save_temp_file(response.content, suffix='.html') as temp_file_path:
         markdown_content = process_conversion(
             temp_file_path,
             '.html',
             url=str(url_input.url)
         )
-        headers = get_rate_limit_headers(request)
-        return RateLimitedResponse(content=markdown_content, headers=headers)
+        return RateLimitedResponse(
+            content=markdown_content, 
+            headers=get_rate_limit_headers(request)
+        )
