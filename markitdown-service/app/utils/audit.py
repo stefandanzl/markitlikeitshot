@@ -125,4 +125,4 @@ def audit_log(
             }
         )
 
-__all__ = ["audit_log", "get_audit_stats", "cleanup_audit_logs"]
+__all__ = ["audit_log"]

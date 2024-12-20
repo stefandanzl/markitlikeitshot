@@ -31,9 +31,6 @@ class FileProcessingError(Exception):
 class ConversionError(Exception):
     pass
 
-class URLFetchError(Exception):
-    pass
-
 # Custom response class for rate limiting
 class RateLimitedResponse(PlainTextResponse):
     def __init__(self, content: str, status_code: int = 200, headers: dict = None, **kwargs):

@@ -82,15 +82,10 @@ class Settings(BaseSettings):
     API_KEY_EXPIRATION_DAYS: Optional[int] = None
 
     # Initial Setup Settings
-    INITIAL_ADMIN_EMAIL: str = os.getenv("INITIAL_ADMIN_EMAIL", "admin@example.com")
     INITIAL_ADMIN_NAME: str = os.getenv("INITIAL_ADMIN_NAME", "System Admin")
 
     # Security Settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    PASSWORD_RESET_TOKEN_EXPIRE_HOURS: int = 24
 
     # Enhanced Logging Settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
@@ -156,17 +151,6 @@ class Settings(BaseSettings):
                 self.get_log_level
             )
         return self.get_log_level
-
-    @property
-    def DATABASE_SETTINGS(self) -> dict:
-        """Get database connection settings"""
-        return {
-            "url": self.DATABASE_URL,
-            "connect_args": self.DATABASE_CONNECT_ARGS,
-            "pool_size": self.DATABASE_POOL_SIZE,
-            "pool_recycle": self.DATABASE_POOL_RECYCLE,
-            "echo": self.DATABASE_ECHO,
-        }
 
     def get_logging_config(self) -> Dict[str, Any]:
         """Generate complete logging configuration"""
