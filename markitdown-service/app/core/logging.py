@@ -54,8 +54,6 @@ def get_base_logging_config() -> Dict[str, Any]:
         }
     }
 
-# app/core/logging.py (continued)
-
 def get_web_logging_config() -> Dict[str, Any]:
     """Web service specific logging configuration."""
     config = get_base_logging_config()
@@ -65,21 +63,47 @@ def get_web_logging_config() -> Dict[str, Any]:
         "format": "worker[%(process)d] - %(message)s"
     }
     
+    # Configure handlers based on environment
+    if settings.ENVIRONMENT == "test":
+        # In test environment, only log errors and use simple format
+        config["formatters"]["test"] = {
+            "format": "%(levelname)s: %(message)s"
+        }
+        config["handlers"]["console"].update({
+            "formatter": "test",
+            "level": "ERROR"  # Only show ERROR and above in tests
+        })
+        # Disable file logging in test environment
+        config["handlers"]["file"] = {
+            "class": "logging.NullHandler"
+        }
+    
     # Add web-specific loggers
     config["loggers"].update({
         "uvicorn": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "WARNING" if settings.ENVIRONMENT == "test" else "INFO",
             "propagate": False
         },
         "uvicorn.error": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "WARNING" if settings.ENVIRONMENT == "test" else "INFO",
             "propagate": False
         },
         "uvicorn.access": {
             "handlers": ["null"],
             "level": "WARNING",
+            "propagate": False
+        },
+        # Configure app loggers
+        "app": {
+            "handlers": ["console", "file"],
+            "level": "ERROR" if settings.ENVIRONMENT == "test" else "DEBUG",
+            "propagate": False
+        },
+        "app.api": {
+            "handlers": ["console", "file"],
+            "level": "ERROR" if settings.ENVIRONMENT == "test" else "DEBUG",
             "propagate": False
         }
     })

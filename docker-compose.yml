@@ -61,32 +61,33 @@ services:
       start_period: 10s
     profiles:
       - prod
-
+        
   # Test service
   markitdown-test:
-    build: 
-      context: ./markitdown-service
-      dockerfile: Dockerfile
-    volumes:
-      - ./markitdown-service/app:/app/app  # Keep for test file access
-      - type: volume
-        source: markitdown_test_data
-        target: /app/data
-      - type: volume
-        source: markitdown_test_logs
-        target: /app/logs
-    environment:
-      - ENVIRONMENT=test
-      - PYTHONPATH=/app
-      - DATABASE_URL=sqlite:///./data/test_api_keys.db
-      - API_KEY_AUTH_ENABLED=true
-      - SECRET_KEY=test-secret-key
-      - ADMIN_API_KEY=test-admin-key
-      - LOG_LEVEL=WARNING
-    entrypoint: python -m pytest
-    command: /app/tests/test_api.py -v --capture=no
-    profiles:
-      - test
+      build: 
+        context: ./markitdown-service
+        dockerfile: Dockerfile
+      volumes:
+        - ./markitdown-service/app:/app/app
+        - ./markitdown-service/tests:/app/tests
+        - type: volume
+          source: markitdown_test_data
+          target: /app/data
+        - type: volume
+          source: markitdown_test_logs
+          target: /app/logs
+      environment:
+        - ENVIRONMENT=test
+        - PYTHONPATH=/app
+        - DATABASE_URL=sqlite:///./data/test_api_keys.db
+        - API_KEY_AUTH_ENABLED=true
+        - SECRET_KEY=test-secret-key
+        - ADMIN_API_KEY=test-admin-key
+        - LOG_LEVEL=WARNING
+      entrypoint: python -m pytest
+      command: tests/test_endpoints.py -v --capture=no  # Updated to use new test file
+      profiles:
+        - test
 
 volumes:
   markitdown_dev_data:

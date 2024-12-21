@@ -312,6 +312,27 @@ start_environment() {
         docker_compose --profile $env build $service
     fi
     
+    # Special handling for test environment
+    if [ "$env" = "test" ]; then
+        print_colored "YELLOW" "Running tests..."
+        
+        # Run tests and capture exit code
+        if docker_compose --profile test run --rm $service; then
+            print_colored "GREEN" "Tests completed successfully!"
+        else
+            print_colored "RED" "Tests failed!"
+            exit 1
+        fi
+        
+        # Clean up test environment
+        print_colored "YELLOW" "Cleaning up test environment..."
+        docker_compose --profile test down -v
+        print_colored "GREEN" "Test environment cleaned up"
+        
+        return
+    fi
+    
+    # Normal environment startup for non-test environments
     if [ "$DETACH" = true ]; then
         docker_compose --profile $env up -d --remove-orphans $service
     else

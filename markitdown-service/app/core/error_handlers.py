@@ -1,5 +1,3 @@
-# app/core/error_handlers.py
-
 from functools import wraps
 from typing import Callable, Type, Optional, Dict, Tuple
 from fastapi import HTTPException, status
@@ -7,19 +5,25 @@ import requests
 import logging
 from app.utils.audit import audit_log
 import time
+from app.core.base_exceptions import OperationError
+from app.core.exceptions import FileProcessingError, ConversionError
 
 logger = logging.getLogger(__name__)
 
-class OperationError(Exception):
-    """Base class for operation errors"""
-    def __init__(self, message: str, status_code: int = 500):
-        self.message = message
-        self.status_code = status_code
-        super().__init__(message)
+# Define standard error mappings
+DEFAULT_ERROR_MAP = {
+    FileProcessingError: (status.HTTP_400_BAD_REQUEST, None),
+    requests.ConnectionError: (status.HTTP_502_BAD_GATEWAY, None),
+    requests.Timeout: (status.HTTP_502_BAD_GATEWAY, None),
+    requests.RequestException: (status.HTTP_502_BAD_GATEWAY, None),
+    ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+    OperationError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+    Exception: (status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
+}
 
 def handle_api_operation(
     operation_name: str,
-    error_map: Dict[Type[Exception], Tuple[int, str]] = None,
+    error_map: Optional[Dict[Type[Exception], Tuple[int, Optional[str]]]] = None,
     audit: bool = True
 ):
     """
@@ -28,8 +32,14 @@ def handle_api_operation(
     Args:
         operation_name: Name of the operation for logging
         error_map: Mapping of exception types to (status_code, message)
+                  Use None as message to pass through the original error message
         audit: Whether to create audit logs
     """
+    # Combine default error map with provided error map
+    final_error_map = DEFAULT_ERROR_MAP.copy()
+    if error_map:
+        final_error_map.update(error_map)
+
     def decorator(func: Callable):
         # Get logger for the module where decorator is used
         logger = logging.getLogger(func.__module__)
@@ -71,79 +81,76 @@ def handle_api_operation(
                 
                 return result
                 
-            except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
-                # Special handling for URL-related errors to prevent double logging
-                duration = time.time() - start_time
-                error_config = error_map.get(type(e)) if error_map else None
-                status_code = error_config[0] if error_config else 400
-                message = error_config[1] if error_config else "URL request failed"
-                
-                logger.warning(
-                    f"{operation_name} URL error",
-                    extra={
-                        "duration": duration,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e)
-                    }
-                )
-                
-                if audit:
-                    audit_log(
-                        action=operation_name,
-                        user_id=user_id,
-                        details={
-                            "error": str(e),
-                            "duration": duration
-                        },
-                        status="failure"
-                    )
-                
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=message
-                )
-                
             except Exception as e:
-                # Handle all other exceptions
+                # Handle all exceptions uniformly
                 duration = time.time() - start_time
-                error_config = error_map.get(type(e)) if error_map else None
-                status_code = error_config[0] if error_config else 500
-                message = error_config[1] if error_config else str(e)
+
+                # Special handling for responses library exceptions
+                if hasattr(e, 'body') and isinstance(e.body, Exception):
+                    actual_exception = e.body
+                    error_type = type(actual_exception)
+                else:
+                    actual_exception = e
+                    error_type = type(e)
                 
-                logger.exception(
-                    f"{operation_name} failed",
-                    extra={
-                        "duration": duration,
-                        "error_type": type(e).__name__,
-                        "error_message": str(e)
-                    }
-                )
+                # Find most specific error mapping
+                error_config = None
+                for exc_type, config in final_error_map.items():
+                    if isinstance(actual_exception, exc_type):
+                        error_config = config
+                        break
                 
+                if error_config:
+                    status_code, message = error_config
+                    # Use original error message if message is None
+                    detail = str(actual_exception) if message is None else message
+                else:
+                    status_code = getattr(actual_exception, 'status_code', 500)
+                    detail = str(actual_exception)
+
+                # Log at appropriate level
+                if status_code >= 500:
+                    logger.exception(
+                        f"{operation_name} failed",
+                        extra={
+                            "duration": duration,
+                            "error_type": error_type.__name__,
+                            "error_message": str(actual_exception),
+                            "status_code": status_code
+                        }
+                    )
+                else:
+                    logger.warning(
+                        f"{operation_name} error",
+                        extra={
+                            "duration": duration,
+                            "error_type": error_type.__name__,
+                            "error_message": str(actual_exception),
+                            "status_code": status_code
+                        }
+                    )
+                
+                # Audit error
                 if audit:
                     audit_log(
                         action=operation_name,
                         user_id=user_id,
                         details={
-                            "error": str(e),
-                            "duration": duration
+                            "error": str(actual_exception),
+                            "error_type": error_type.__name__,
+                            "duration": duration,
+                            "status_code": status_code
                         },
                         status="failure"
                     )
                 
+                # Raise HTTP exception with appropriate status and detail
                 raise HTTPException(
                     status_code=status_code,
-                    detail=message
+                    detail=detail
                 )
                 
         return wrapper
     return decorator
 
-def handle_url_operation(operation_name: str):
-    """Decorator for handling URL-related operation errors."""
-    return handle_api_operation(
-        operation_name=operation_name,
-        error_map={
-            requests.exceptions.ConnectionError: (status.HTTP_400_BAD_REQUEST, "Unable to connect to the specified URL"),
-            requests.exceptions.RequestException: (status.HTTP_400_BAD_REQUEST, "Failed to fetch URL content")
-        }
-    )
+__all__ = ["handle_api_operation", "OperationError", "DEFAULT_ERROR_MAP"]

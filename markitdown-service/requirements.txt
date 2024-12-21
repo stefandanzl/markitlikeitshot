@@ -18,3 +18,4 @@ rich
 python-jose[cryptography]
 ipython
 bcrypt
+responses
