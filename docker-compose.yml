@@ -85,9 +85,6 @@ services:
       - LOG_LEVEL=WARNING
     entrypoint: python -m pytest
     command: /app/tests/test_api.py -v --capture=no
-    depends_on:
-      markitdown-prod:
-        condition: service_healthy
     profiles:
       - test
 
