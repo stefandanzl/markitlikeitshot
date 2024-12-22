@@ -72,17 +72,28 @@ class TestNoAuthAPI:
             "/api/v1/convert/url",
             json={"url": test_url}
         )
-        
+
         assert response.status_code == 200
         content = response.text
+
+        # Check title and initial description
         assert "# Goat" in content
         assert "Domesticated mammal" in content
         assert "Capra hircus" in content
+
+        # Check specific content details
+        assert "domesticated species of goat" in content
+        assert "Southwest Asia" in content
+        assert "Eastern Europe" in content
+
+        # Check major sections exist
         assert any(section in content for section in [
             "## Etymology",
+            "## History",
             "## Biology",
-            "## Description",
-            "## Uses"
+            "## Agriculture",
+            "## Uses",
+            "## In culture"
         ])
 
 class TestAuthAPI:
@@ -160,12 +171,29 @@ class TestAuthAPI:
             json={"url": test_url},
             headers=self.headers
         )
-        
+
         assert response.status_code == 200
         content = response.text
+
+        # Check title and initial description
         assert "# Goat" in content
         assert "Domesticated mammal" in content
         assert "Capra hircus" in content
+
+        # Check specific content details
+        assert "domesticated species of goat" in content
+        assert "Southwest Asia" in content
+        assert "Eastern Europe" in content
+
+        # Check major sections exist
+        assert any(section in content for section in [
+            "## Etymology",
+            "## History",
+            "## Biology",
+            "## Agriculture",
+            "## Uses",
+            "## In culture"
+        ])
 
     def test_invalid_api_key(self) -> None:
         """Test using invalid API key"""
