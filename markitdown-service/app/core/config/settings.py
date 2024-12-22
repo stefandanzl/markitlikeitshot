@@ -1,4 +1,3 @@
-# app/core/config/settings.py
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any

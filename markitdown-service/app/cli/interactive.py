@@ -28,6 +28,7 @@ class MenuChoice(str, Enum):
     DEACTIVATE_KEY = "Deactivate API Key"
     REACTIVATE_KEY = "Reactivate API Key"
     VIEW_KEY = "View Key Details"
+    ROTATE_LOGS = "Rotate Logs"  # Add this line
     VERSION = "Show Version Info"
     EXIT = "Exit"
 
@@ -272,6 +273,17 @@ def view_key_menu():
         logger.exception("Failed to view API key")
         console.print(f"[red]Error viewing API key: {str(e)}[/red]")
 
+def rotate_logs_menu():
+    """Interactive menu for log rotation."""
+    try:
+        if Confirm.ask("[cyan]Rotate all log files now?[/cyan]"):
+            from app.cli.commands.logs import rotate
+            typer.echo()
+            rotate()
+    except Exception as e:
+        logger.exception("Failed to rotate logs")
+        console.print(f"[red]Error rotating logs: {str(e)}[/red]")
+
 def interactive_menu():
     """Main interactive menu loop."""
     try:
@@ -302,6 +314,8 @@ def interactive_menu():
                 reactivate_key_menu()
             elif choice == MenuChoice.VIEW_KEY:
                 view_key_menu()
+            elif choice == MenuChoice.ROTATE_LOGS:
+                rotate_logs_menu()
             elif choice == MenuChoice.VERSION:
                 display_version_info()
             

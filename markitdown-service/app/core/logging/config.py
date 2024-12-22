@@ -49,8 +49,8 @@ def get_file_handler(filename: str, formatter: str = "detailed") -> Dict[str, An
         "interval": 1,
         "backupCount": settings.LOG_BACKUP_COUNT,
         "encoding": settings.LOG_ENCODING,
-        "delay": True,  # Delay file creation until first log
-        "utc": True    # Use UTC for timestamps
+        "delay": False,
+        "utc": True
     }
 
 def get_base_logging_config() -> Dict[str, Any]:
