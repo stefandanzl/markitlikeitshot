@@ -181,5 +181,17 @@ class TestAuthAPI:
         assert response.status_code == 403
         assert response.json()["detail"] in ["Invalid API key", "API key validation failed"]
 
+    def test_empty_api_key(self) -> None:
+        """Test with empty API key"""
+        test_html = "<h1>Test</h1>"
+        headers = {settings.API_KEY_HEADER_NAME: ""}
+        response = self.client.post(
+            "/api/v1/convert/text",
+            json={"content": test_html},
+            headers=headers
+        )
+        assert response.status_code == 403
+        assert "API key required" in response.json()["detail"]
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
