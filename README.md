@@ -262,6 +262,7 @@ python manage.py clean
 markitlikeitshot
 ├── ai_dump.sh
 ├── docker-compose.yml
+├── LICENSE
 ├── markitdown-service
 │   ├── app
 │   │   ├── api
@@ -271,6 +272,7 @@ markitlikeitshot
 │   │   ├── cli
 │   │   │   ├── commands
 │   │   │   │   ├── api_key.py
+│   │   │   │   ├── logs.py
 │   │   │   │   └── user.py
 │   │   │   ├── interactive.py
 │   │   │   └── manage.py
@@ -291,7 +293,8 @@ markitlikeitshot
 │   │   │   ├── logging
 │   │   │   │   ├── config.py
 │   │   │   │   ├── formatters.py
-│   │   │   │   └── __init__.py
+│   │   │   │   ├── __init__.py
+│   │   │   │   └── management.py
 │   │   │   ├── rate_limiting
 │   │   │   │   ├── __init__.py
 │   │   │   │   └── limiter.py
@@ -311,13 +314,13 @@ markitlikeitshot
 │   │       │   ├── api_key.py
 │   │       │   └── user.py
 │   │       └── __init__.py
+│   ├── docker
+│   │   ├── config
+│   │   │   ├── log-maintenance
+│   │   │   └── logrotate.conf
+│   │   └── start.sh
 │   ├── Dockerfile
 │   ├── logs
-│   │   ├── app_development.log
-│   │   ├── audit_development.log
-│   │   ├── audit_test.log
-│   │   ├── cli_development.log
-│   │   └── sql_development.log
 │   ├── manage.py
 │   ├── pytest.ini
 │   ├── requirements.txt
