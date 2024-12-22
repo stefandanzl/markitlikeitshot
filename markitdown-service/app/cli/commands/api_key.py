@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.models.auth.api_key import Role, APIKey
 from app.core.security.api_key import create_api_key
 from app.db.session import get_db_session
-from app.utils.audit import audit_log
+from app.core.audit import audit_log, AuditAction
 from app.models.auth.user import User, UserStatus
 import logging
 
@@ -160,7 +160,7 @@ def deactivate(
             
             # Audit logging
             audit_log(
-                action="deactivate_api_key",
+                action=AuditAction.API_KEY_DEACTIVATED,
                 user_id=str(key_id),
                 details=f"Deactivated API key {api_key.name}"
             )

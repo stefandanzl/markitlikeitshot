@@ -14,10 +14,10 @@ from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
 from app.db.init_db import ensure_db_initialized
 from app.db.session import get_db, get_db_session
-from app.utils.audit import audit_log
 from app.core.config.settings import settings
 from app.core.rate_limiting.limiter import limiter
 from app.core.logging.config import get_web_logging_config
+from app.core.audit import audit_log, AuditAction
 
 # Initialize logging
 os.makedirs(settings.LOG_DIR, exist_ok=True)
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         
         # Audit log startup with detailed environment info
         audit_log(
-            action="service_startup",
+            action=AuditAction.SERVICE_STARTUP,
             user_id=None,
             details={
                 "environment": settings.ENVIRONMENT,
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.critical(f"Failed to initialize application: {str(e)}", exc_info=True)
         audit_log(
-            action="service_startup",
+            action=AuditAction.SERVICE_STARTUP,
             user_id=None,
             details={"error": str(e)},
             status="failure"
@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
     try:
         # Perform cleanup tasks here if needed
         audit_log(
-            action="service_shutdown",
+            action=AuditAction.SERVICE_SHUTDOWN,
             user_id=None,
             details={"shutdown_type": "graceful"}
         )
@@ -90,7 +90,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during shutdown: {str(e)}", exc_info=True)
         audit_log(
-            action="service_shutdown",
+            action=AuditAction.SERVICE_SHUTDOWN,
             user_id=None,
             details={"error": str(e)},
             status="failure"
@@ -145,7 +145,7 @@ async def custom_rate_limit_handler(request, exc):
     )
     
     audit_log(
-        action="rate_limit_exceeded",
+        action=AuditAction.RATE_LIMIT_EXCEEDED,
         user_id=None,
         details={
             "client_ip": get_remote_address(request),
@@ -204,7 +204,7 @@ async def health_check():
         logger.debug("Health check details", extra=health_status)
         
         audit_log(
-            action="health_check",
+            action=AuditAction.HEALTH_CHECK,
             user_id=None,
             details=health_status
         )
@@ -224,7 +224,7 @@ async def health_check():
         )
         
         audit_log(
-            action="health_check",
+            action=AuditAction.HEALTH_CHECK,
             user_id=None,
             details=error_details,
             status="failure"

@@ -3,7 +3,7 @@ from typing import Callable, Type, Optional, Dict, Tuple
 from fastapi import HTTPException, status
 import requests
 import logging
-from app.utils.audit import audit_log
+from app.core.audit import audit_log, AuditAction
 import time
 from app.core.errors.base import OperationError
 from app.core.errors.exceptions import FileProcessingError, ConversionError
@@ -19,6 +19,13 @@ DEFAULT_ERROR_MAP = {
     ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
     OperationError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
     Exception: (status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
+}
+
+# Map operations to AuditActions
+OPERATION_TO_AUDIT_ACTION = {
+    "convert_text": AuditAction.CONVERT_TEXT,
+    "convert_file": AuditAction.CONVERT_FILE,
+    "convert_url": AuditAction.CONVERT_URL,
 }
 
 def get_error_config(exception: Exception, error_map: Dict[Type[Exception], Tuple[int, Optional[str]]]) -> Tuple[int, Optional[str]]:
@@ -80,8 +87,9 @@ def handle_api_operation(
                 
                 # Audit successful operation
                 if audit:
+                    audit_action = OPERATION_TO_AUDIT_ACTION.get(operation_name, operation_name)
                     audit_log(
-                        action=operation_name,
+                        action=audit_action,
                         user_id=user_id,
                         details={"duration": duration, "status": "success"}
                     )
@@ -110,8 +118,9 @@ def handle_api_operation(
                 
                 # Audit error with consistent format
                 if audit:
+                    audit_action = OPERATION_TO_AUDIT_ACTION.get(operation_name, operation_name)
                     audit_log(
-                        action=operation_name,
+                        action=audit_action,
                         user_id=user_id,
                         details={**log_data, "error": str(actual_exception)},
                         status="failure"

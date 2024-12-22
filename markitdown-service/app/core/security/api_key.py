@@ -10,8 +10,8 @@ from app.models.auth.api_key import APIKey, Role
 from app.models.auth.user import User, UserStatus
 from app.core.config import settings
 from app.db.session import get_db
-from app.utils.audit import audit_log
 import logging
+from app.core.audit import audit_log, AuditAction
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ def create_api_key(
         
         # Audit logging
         audit_log(
-            action="create_api_key",
+            action=AuditAction.API_KEY_CREATED,
             user_id=str(user_id),
             details={
                 "key_name": name,
@@ -125,7 +125,7 @@ def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
                 
                 # Audit logging
                 audit_log(
-                    action="api_key_used",
+                    action=AuditAction.API_KEY_USED,
                     user_id=str(api_key.user_id),
                     details={
                         "key_name": api_key.name,
@@ -154,7 +154,7 @@ def deactivate_api_key(
             
             # Audit logging
             audit_log(
-                action="deactivate_api_key",
+                action=AuditAction.API_KEY_DEACTIVATED,
                 user_id=str(deactivated_by_user_id),
                 details={
                     "key_id": key_id,
@@ -188,7 +188,7 @@ def reactivate_api_key(
             
             # Audit logging
             audit_log(
-                action="reactivate_api_key",
+                action=AuditAction.API_KEY_REACTIVATED,
                 user_id=str(reactivated_by_user_id),
                 details={
                     "key_id": key_id,
@@ -225,7 +225,7 @@ async def get_api_key(
         if not key:
             # Audit logging for failed attempts
             audit_log(
-                action="api_key_invalid",
+                action=AuditAction.API_KEY_INVALID,
                 user_id=None,
                 details="Invalid API key attempt",
                 status="failure"
@@ -252,7 +252,7 @@ def require_admin(api_key: APIKey = Depends(get_api_key)):
     if settings.API_KEY_AUTH_ENABLED and (not api_key or api_key.role != Role.ADMIN):
         # Audit logging for unauthorized admin access attempts
         audit_log(
-            action="admin_access_denied",
+            action=AuditAction.ADMIN_ACCESS_DENIED,
             user_id=str(api_key.user_id) if api_key else None,
             details="Unauthorized admin access attempt",
             status="failure"

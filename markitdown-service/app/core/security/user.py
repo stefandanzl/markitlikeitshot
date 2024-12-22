@@ -3,7 +3,7 @@ import logging
 from sqlmodel import Session, select
 from app.models.auth.user import User, UserStatus
 from app.core.config import settings
-from app.utils.audit import audit_log
+from app.core.audit import audit_log, AuditAction
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def create_user(
         
         # Audit logging
         audit_log(
-            action="create_user",
+            action=AuditAction.USER_CREATED,
             user_id=str(user.id),
             details={
                 "name": name,
@@ -70,7 +70,7 @@ def update_user_status(
     db.commit()
     
     audit_log(
-        action="update_user_status",
+        action=AuditAction.USER_STATUS_UPDATED,
         user_id=str(updated_by),
         details={
             "target_user": user_id,
