@@ -16,11 +16,30 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Create required directories
+      run: |
+        mkdir -p markitdown-service/logs
+        mkdir -p markitdown-service/data
+        chmod 777 markitdown-service/logs
+        chmod 777 markitdown-service/data
+
     - name: Build and run tests
+      env:
+        ENVIRONMENT: test
+        SECRET_KEY: test-secret-key
+        ADMIN_API_KEY: test-admin-key
       run: |
         docker compose --profile test build
-        docker compose --profile test run --rm test
+        docker compose --profile test run --rm markitdown-test
+
+    - name: Upload test logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-logs
+        path: markitdown-service/logs/
+        retention-days: 7
 
     - name: Cleanup
       if: always()
-      run: docker compose down --remove-orphans
+      run: docker compose down --remove-orphans -v

@@ -12,3 +12,10 @@ pytest
 httpx
 pytest-asyncio
 pytest-cov
+sqlmodel
+typer[all]
+rich
+python-jose[cryptography]
+ipython
+bcrypt
+responses

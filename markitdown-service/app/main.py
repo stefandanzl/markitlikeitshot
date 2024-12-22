@@ -1,79 +1,117 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, status, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
-from pydantic import BaseModel, HttpUrl
-from typing import Optional
-from markitdown import MarkItDown
-import tempfile
-import os
+import time
 import logging
-import requests
-import time  # Add this line
-from contextlib import contextmanager
-from app.core.config import settings
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+import logging.config
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from sqlalchemy import text
+import os
+from app.api.v1.endpoints import conversion
+from app.core.security.api_key import get_api_key
+from app.db.init_db import ensure_db_initialized
+from app.db.session import get_db, get_db_session
+from app.core.config.settings import settings
+from app.core.rate_limiting.limiter import limiter
+from app.core.logging.config import get_web_logging_config
+from app.core.audit import audit_log, AuditAction
 
-# Custom exceptions
-class FileProcessingError(Exception):
-    pass
+# Initialize logging
+os.makedirs(settings.LOG_DIR, exist_ok=True)
+logging.config.dictConfig(get_web_logging_config())
 
-class ConversionError(Exception):
-    pass
-
-class URLFetchError(Exception):
-    pass
-
-# Set up logging
-log_level = getattr(logging, settings.LOG_LEVEL)
-logging.basicConfig(
-    level=log_level,
-    format='%(levelname)s:%(name)s:%(message)s' if settings.ENVIRONMENT == "test" else '%(levelname)s:%(message)s'
-)
+# Create module-specific loggers
 logger = logging.getLogger(__name__)
+api_logger = logging.getLogger("app.api")
+db_logger = logging.getLogger("app.db")
+security_logger = logging.getLogger("app.core.security")
 
-# Set third-party loggers to WARNING level in test environment
-if settings.ENVIRONMENT == "test":
-    logging.getLogger("slowapi").setLevel(logging.WARNING)
-    logging.getLogger("multipart").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI application.
+    Handles startup and shutdown events.
+    """
+    # Startup
+    try:
+        logger.info("Starting application initialization...")
+        
+        # Log detailed configuration in debug mode
+        logger.debug("Application configuration:")
+        logger.debug(f"Environment: {settings.ENVIRONMENT}")
+        logger.debug(f"Log Level: {settings.LOG_LEVEL}")
+        logger.debug(f"API Key Auth: {settings.API_KEY_AUTH_ENABLED}")
+        logger.debug(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
+        
+        # Initialize database
+        logger.info("Initializing database...")
+        ensure_db_initialized()
+        
+        # Log startup status
+        logger.info(f"Application started successfully in {settings.ENVIRONMENT} mode")
+        
+        # Audit log startup with detailed environment info
+        audit_log(
+            action=AuditAction.SERVICE_STARTUP,
+            user_id=None,
+            details={
+                "environment": settings.ENVIRONMENT,
+                "log_level": settings.LOG_LEVEL,
+                "api_auth_enabled": settings.API_KEY_AUTH_ENABLED,
+                "version": settings.VERSION
+            }
+        )
+        
+    except Exception as e:
+        logger.critical(f"Failed to initialize application: {str(e)}", exc_info=True)
+        audit_log(
+            action=AuditAction.SERVICE_STARTUP,
+            user_id=None,
+            details={"error": str(e)},
+            status="failure"
+        )
+        raise
+    
+    yield  # Server is running
+    
+    # Shutdown
+    logger.info("Initiating application shutdown...")
+    try:
+        # Perform cleanup tasks here if needed
+        audit_log(
+            action=AuditAction.SERVICE_SHUTDOWN,
+            user_id=None,
+            details={"shutdown_type": "graceful"}
+        )
+        logger.info("Application shutdown completed successfully")
+    except Exception as e:
+        logger.error(f"Error during shutdown: {str(e)}", exc_info=True)
+        audit_log(
+            action=AuditAction.SERVICE_SHUTDOWN,
+            user_id=None,
+            details={"error": str(e)},
+            status="failure"
+        )
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
-
-# Custom response class for rate limiting
-class RateLimitedResponse(PlainTextResponse):
-    def __init__(self, content: str, status_code: int = 200, headers: dict = None, **kwargs):
-        super().__init__(content, status_code=status_code, **kwargs)
-        if headers:
-            self.headers.update(headers)
-
+# Initialize FastAPI app with lifespan
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    version=settings.VERSION
+    version=settings.VERSION,
+    description="A service for converting various file formats to Markdown",
+    docs_url=settings.DOCS_URL,
+    redoc_url=settings.REDOC_URL,
+    openapi_url=settings.OPENAPI_URL,
+    lifespan=lifespan
 )
-
-# Custom rate limit exceeded handler
-@app.exception_handler(RateLimitExceeded)
-async def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    """Custom rate limit exceeded handler"""
-    return JSONResponse(
-        status_code=429,
-        content={"detail": "Rate limit exceeded"},
-        headers={
-            "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(int(time.time() + settings.RATE_LIMIT_WINDOW))
-        }
-    )
 
 # Add rate limiter to app
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
-# Configure CORS with settings
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
@@ -82,155 +120,130 @@ app.add_middleware(
     allow_headers=settings.ALLOWED_HEADERS,
 )
 
-class TextInput(BaseModel):
-    content: str
-    options: Optional[dict] = None
-
-class UrlInput(BaseModel):
-    url: HttpUrl
-    options: Optional[dict] = None
-
-@contextmanager
-def save_temp_file(content: bytes, suffix: str) -> str:
-    """
-    Save content to a temporary file and return the file path.
-    """
-    if len(content) > settings.MAX_FILE_SIZE:
-        raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
-
-    with tempfile.NamedTemporaryFile(suffix=suffix, mode='w+b', delete=False) as temp_file:
-        try:
-            temp_file.write(content)
-            temp_file.flush()
-            logger.debug(f"Temporary file created at: {temp_file.name}")
-            yield temp_file.name
-        except Exception as e:
-            logger.exception("Failed to create temporary file")
-            raise FileProcessingError(f"Failed to create temporary file: {str(e)}")
-        finally:
-            if os.path.exists(temp_file.name):
-                os.unlink(temp_file.name)
-
-def process_conversion(file_path: str, ext: str, url: Optional[str] = None, content_type: str = None) -> str:
-    """
-    Process conversion using MarkItDown and clean the markdown content.
-    """
-    try:
-        converter = MarkItDown()
+# Custom rate limit exceeded handler
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_handler(request, exc):
+    """Handle rate limit exceeded exceptions."""
+    now = int(time.time())
+    if settings.RATE_LIMIT_PERIOD == "minute":
+        window_seconds = 60
+    elif settings.RATE_LIMIT_PERIOD == "hour":
+        window_seconds = 3600
+    else:
+        window_seconds = 60  # Default to minute if unknown period
         
-        # Check if file exists and has content
-        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-            raise ConversionError("Input file is empty or does not exist")
-            
-        if url and "wikipedia.org" in url:
-            logger.debug("Using WikipediaConverter for Wikipedia URL")
-            result = converter.convert(file_path, file_extension=ext, url=url, converter_type='wikipedia')
-        else:
-            # For HTML content, use the html2text converter explicitly
-            if ext.lower() == '.html':
-                result = converter.convert(file_path, file_extension=ext, converter_type='html')
-            else:
-                result = converter.convert(file_path, file_extension=ext, url=url)
-            
-        if not result or not result.text_content:
-            raise ConversionError("Conversion resulted in empty content")
-            
-        markdown_content = result.text_content
-        logger.debug("Markdown content cleaned up")
-        return markdown_content
-    except Exception as e:
-        logger.exception("Conversion failed")
-        raise ConversionError(f"Failed to convert content: {str(e)}")
+    window_reset = now + window_seconds
+    
+    # Log rate limit violation with client info
+    security_logger.warning(
+        "Rate limit exceeded",
+        extra={
+            "client_ip": get_remote_address(request),
+            "path": request.url.path,
+            "reset_time": window_reset
+        }
+    )
+    
+    audit_log(
+        action=AuditAction.RATE_LIMIT_EXCEEDED,
+        user_id=None,
+        details={
+            "client_ip": get_remote_address(request),
+            "path": request.url.path,
+            "reset_time": window_reset
+        },
+        status="failure"
+    )
+    
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Rate limit exceeded",
+            "type": "rate_limit_exceeded"
+        },
+        headers={
+            "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": str(window_reset),
+            "Retry-After": str(window_seconds)
+        }
+    )
 
-def get_rate_limit_headers(request: Request) -> dict:
-    """
-    Get rate limit headers from request state
-    """
-    return {
-        "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-        "X-RateLimit-Remaining": str(getattr(request.state, "view_rate_limit_remaining", 0)),
-        "X-RateLimit-Reset": str(getattr(request.state, "view_rate_limit_reset", 0))
-    }
+# Include routers with API key dependency
+app.include_router(
+    conversion.router,
+    prefix=settings.API_V1_STR,
+    tags=["conversion"],
+    dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
+)
 
-@contextmanager
-def error_handler():
-    try:
-        yield None
-    except requests.RequestException as e:
-        logger.exception("Error fetching URL")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Error fetching URL: {str(e)}"
-        )
-    except FileProcessingError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except ConversionError as e:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except Exception as e:
-        logger.exception("Unexpected error during text conversion")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                          detail="An unexpected error occurred during conversion")
-
-@app.post("/convert/text", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
-async def convert_text(request: Request, text_input: TextInput):
-    """Convert text or HTML to markdown."""
-    with error_handler():
-        logger.debug(f"Received content: {text_input.content[:100]}...")
-        content = text_input.content
-        with save_temp_file(content.encode('utf-8'), suffix='.html') as temp_file_path:
-            markdown_content = process_conversion(temp_file_path, '.html')
-            headers = get_rate_limit_headers(request)
-            return RateLimitedResponse(content=markdown_content, headers=headers)
-
-@app.post("/convert/file", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
-async def convert_file(request: Request, file: UploadFile = File(...)):
-    """Convert an uploaded file to markdown."""
-    with error_handler():
-        _, ext = os.path.splitext(file.filename)
-        if ext.lower() not in settings.SUPPORTED_EXTENSIONS:
-            raise FileProcessingError(f"Unsupported file type: {ext}")
-
-        content = await file.read()
-        if len(content) > settings.MAX_FILE_SIZE:
-            raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
-
-        with save_temp_file(content, suffix=ext) as temp_file_path:
-            markdown_content = process_conversion(temp_file_path, ext)
-            headers = get_rate_limit_headers(request)
-            return RateLimitedResponse(content=markdown_content, headers=headers)
-
-@app.post("/convert/url", response_class=RateLimitedResponse)
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/hour")
-async def convert_url(request: Request, url_input: UrlInput):
-    """Fetch a URL and convert its content to markdown."""
-    with error_handler():
-        logger.debug(f"Fetching URL: {url_input.url}")
-        headers = {'User-Agent': settings.USER_AGENT}
-        
-        response = requests.get(
-            str(url_input.url), 
-            headers=headers, 
-            timeout=settings.REQUEST_TIMEOUT
-        )
-        response.raise_for_status()
-        
-        content = response.content
-        with save_temp_file(content, suffix='.html') as temp_file_path:
-            markdown_content = process_conversion(
-                temp_file_path,
-                '.html',
-                url=str(url_input.url)
-            )
-            headers = get_rate_limit_headers(request)
-            return RateLimitedResponse(content=markdown_content, headers=headers)
-
-@app.get("/health")
+# Health check endpoint (no API key required)
+@app.get("/health", tags=["system"])
 async def health_check():
     """Check the health of the service."""
-    return {
-        "status": "healthy",
-        "version": settings.VERSION,
-        "supported_formats": settings.SUPPORTED_EXTENSIONS
-    }
+    try:
+        # Verify database connection using context manager
+        with get_db_session() as db:
+            db.execute(text("SELECT 1"))
+            db_logger.debug("Database health check successful")
+        
+        health_status = {
+            "status": "healthy",
+            "version": settings.VERSION,
+            "environment": settings.ENVIRONMENT,
+            "auth_enabled": settings.API_KEY_AUTH_ENABLED,
+            "supported_formats": settings.SUPPORTED_EXTENSIONS,
+            "database": "connected",
+            "rate_limit": {
+                "requests": settings.RATE_LIMIT_REQUESTS,
+                "period": settings.RATE_LIMIT_PERIOD
+            }
+        }
+        
+        # Log health check with detailed status in debug mode
+        logger.debug("Health check details", extra=health_status)
+        
+        audit_log(
+            action=AuditAction.HEALTH_CHECK,
+            user_id=None,
+            details=health_status
+        )
+        
+        return health_status
+    except Exception as e:
+        error_details = {
+            "status": "unhealthy",
+            "version": settings.VERSION,
+            "error": str(e)
+        }
+        
+        logger.error(
+            "Health check failed",
+            exc_info=True,
+            extra=error_details
+        )
+        
+        audit_log(
+            action=AuditAction.HEALTH_CHECK,
+            user_id=None,
+            details=error_details,
+            status="failure"
+        )
+        
+        return JSONResponse(
+            status_code=503,
+            content=error_details
+        )
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=settings.ENVIRONMENT == "development",
+        log_level=settings.LOG_LEVEL.lower(),
+        log_config=get_web_logging_config(),
+        workers=1
+    )

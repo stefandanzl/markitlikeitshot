@@ -11,7 +11,13 @@ RUN apt-get update && apt-get install -y \
     libmagic1 \
     tesseract-ocr \
     python3-venv \
+    curl \
+    python3-ipython \
     && rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/logs && \
+    chmod 777 /app/data /app/logs  # Ensure directories are writable
 
 # Create and activate virtual environment
 ENV VIRTUAL_ENV=/opt/venv
@@ -25,8 +31,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application
+# Copy the application
 COPY ./app /app/app
+COPY manage.py /app/manage.py
+
+# Set proper permissions
+RUN chmod +x /app/manage.py
 
 # Command to run the application
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

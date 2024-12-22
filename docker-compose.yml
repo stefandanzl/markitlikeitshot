@@ -1,27 +1,97 @@
 services:
-  markitdown:
+  # Development service
+  markitdown-dev:
     build: 
       context: ./markitdown-service
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     volumes:
-      - ./markitdown-service/app:/app/app
+      - ./markitdown-service/app:/app/app  # Enable hot reload
+      - type: volume
+        source: markitdown_dev_data
+        target: /app/data
+      - ./markitdown-service/logs:/app/logs
     environment:
       - ENVIRONMENT=development
+      - DATABASE_URL=sqlite:///./data/dev_api_keys.db
+      - API_KEY_AUTH_ENABLED=true
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-dev-admin-key}
+      - LOG_LEVEL=DEBUG
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - dev
 
-  test:
+  # Production service
+  markitdown-prod:
     build: 
       context: ./markitdown-service
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     volumes:
-      - ./markitdown-service:/app
+      - type: volume
+        source: markitdown_prod_data
+        target: /app/data
+      - ./markitdown-service/logs:/app/logs
     environment:
-      - ENVIRONMENT=test
-      - PYTHONPATH=/app
-    entrypoint: python -m pytest
-    command: /app/tests/test_api.py -v --capture=no
-    depends_on:
-      - markitdown
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./data/api_keys.db
+      - API_KEY_AUTH_ENABLED=true
+      - SECRET_KEY=${SECRET_KEY:-default-secret-key-change-in-production}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-admin-key-change-in-production}
+      - LOG_LEVEL=INFO
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     profiles:
-      - test
+      - prod
+        
+  # Test service
+  markitdown-test:
+      build: 
+        context: ./markitdown-service
+        dockerfile: Dockerfile
+      volumes:
+        - ./markitdown-service/app:/app/app
+        - ./markitdown-service/tests:/app/tests
+        - ./markitdown-service/pytest.ini:/app/pytest.ini
+        - type: volume
+          source: markitdown_test_data
+          target: /app/data
+        - ./markitdown-service/logs:/app/logs
+      environment:
+        - ENVIRONMENT=test
+        - PYTHONPATH=/app
+        - DATABASE_URL=sqlite:///./data/test_api_keys.db
+        - API_KEY_AUTH_ENABLED=true
+        - SECRET_KEY=test-secret-key
+        - ADMIN_API_KEY=test-admin-key
+        - LOG_LEVEL=WARNING
+      entrypoint: python -m pytest
+      command: tests/test_endpoints.py -v --capture=no -c /app/pytest.ini
+      profiles:
+        - test
+
+volumes:
+  markitdown_dev_data:
+    name: markitdown_dev_data
+  markitdown_prod_data:
+    name: markitdown_prod_data
+  markitdown_test_data:
+    name: markitdown_test_data
+
+networks:
+  default:
+    driver: bridge
