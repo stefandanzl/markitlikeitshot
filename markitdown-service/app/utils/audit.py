@@ -1,10 +1,10 @@
 import logging
-import json
 from datetime import datetime, UTC
 from typing import Optional, Any, Dict, Union
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
 from app.core.config.settings import settings
+from app.core.logging.formatters import AuditFormatter
 
 # Create the logs directory if it doesn't exist
 Path(settings.LOG_DIR).mkdir(exist_ok=True)
@@ -23,29 +23,7 @@ if settings.AUDIT_LOG_ENABLED and not audit_logger.handlers:
         encoding=settings.LOG_ENCODING
     )
     
-    # Create custom formatter for audit logs
-    class AuditFormatter(logging.Formatter):
-        def format(self, record):
-            if isinstance(record.msg, dict):
-                # If msg is already a dict, use it directly
-                audit_dict = record.msg
-            else:
-                # Convert message to dict format
-                audit_dict = {
-                    "message": record.msg,
-                    "extra": record.__dict__.get("extra", {})
-                }
-            
-            # Add standard audit fields
-            audit_dict.update({
-                "timestamp": datetime.now(UTC).isoformat(),
-                "level": record.levelname,
-                "logger": record.name,
-                "environment": settings.ENVIRONMENT
-            })
-            
-            return json.dumps(audit_dict, default=str)
-
+    # Use the centralized AuditFormatter
     formatter = AuditFormatter()
     audit_handler.setFormatter(formatter)
     audit_logger.addHandler(audit_handler)
