@@ -1,4 +1,3 @@
-# app/main.py
 import time
 import logging
 import logging.config
@@ -11,15 +10,14 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 import os
-
 from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
-from app.core.config import settings
 from app.db.init_db import ensure_db_initialized
 from app.db.session import get_db, get_db_session
 from app.utils.audit import audit_log
-from app.core.rate_limit import limiter
-from app.core.logging import get_web_logging_config
+from app.core.config.settings import settings
+from app.core.rate_limiting.limiter import limiter
+from app.core.logging.config import get_web_logging_config
 
 # Initialize logging
 os.makedirs(settings.LOG_DIR, exist_ok=True)

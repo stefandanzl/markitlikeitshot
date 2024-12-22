@@ -1,4 +1,4 @@
-# app/core/config.py
+# app/core/config/settings.py
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
 
     # API Key Authentication Settings
     API_KEY_AUTH_ENABLED: bool = True
-    API_KEY_HEADER_NAME: str = "X-API-Key"
+    API_KEY_HEADER_NAME: str = "X-API-Key"  # This was missing
     API_KEY_LENGTH: int = 32
     ADMIN_API_KEY: Optional[str] = os.getenv("ADMIN_API_KEY")
     API_KEY_EXPIRATION_DAYS: Optional[int] = None
@@ -162,3 +162,5 @@ def get_settings() -> Settings:
     return Settings()
 
 settings = get_settings()
+
+__all__ = ["settings", "get_settings"]

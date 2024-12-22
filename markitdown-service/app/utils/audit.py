@@ -4,7 +4,7 @@ from datetime import datetime, UTC
 from typing import Optional, Any, Dict, Union
 from pathlib import Path
 from logging.handlers import TimedRotatingFileHandler
-from app.core.config import settings
+from app.core.config.settings import settings
 
 # Create the logs directory if it doesn't exist
 Path(settings.LOG_DIR).mkdir(exist_ok=True)

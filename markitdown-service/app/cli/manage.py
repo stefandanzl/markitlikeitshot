@@ -14,11 +14,11 @@ import logging.config
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
-from app.core.config import settings
-from app.core.logging import get_cli_logging_config
 from app.models.auth.user import User, UserStatus
 from app.models.auth.api_key import APIKey
 from sqlmodel import select
+from app.core.config.settings import settings
+from app.core.logging.config import get_cli_logging_config
 
 app = typer.Typer(
     help="MarkItDown API Management CLI",

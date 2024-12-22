@@ -1,5 +1,5 @@
 from fastapi import status
-from app.core.base_exceptions import OperationError
+from app.core.errors.base import OperationError
 
 class FileProcessingError(OperationError):
     """Raised when file processing fails"""

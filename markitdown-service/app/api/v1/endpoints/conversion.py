@@ -10,11 +10,11 @@ import logging.config
 import requests
 import time
 from contextlib import contextmanager
-from app.core.config import settings
 from app.core.security.api_key import get_api_key
-from app.core.error_handlers import handle_api_operation, DEFAULT_ERROR_MAP
-from app.core.exceptions import FileProcessingError, ConversionError, ContentTypeError  # Add this import
-from app.core.rate_limit import limiter
+from app.core.config.settings import settings
+from app.core.errors.handlers import handle_api_operation, DEFAULT_ERROR_MAP
+from app.core.errors.exceptions import FileProcessingError, ConversionError, ContentTypeError
+from app.core.rate_limiting.limiter import limiter
 
 # Initialize router
 router = APIRouter(tags=["conversion"])

@@ -5,8 +5,8 @@ import requests
 import logging
 from app.utils.audit import audit_log
 import time
-from app.core.base_exceptions import OperationError
-from app.core.exceptions import FileProcessingError, ConversionError
+from app.core.errors.base import OperationError
+from app.core.errors.exceptions import FileProcessingError, ConversionError
 
 logger = logging.getLogger(__name__)
 

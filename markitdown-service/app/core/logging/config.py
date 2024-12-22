@@ -1,8 +1,7 @@
-# app/core/logging.py (new file)
-
 from typing import Dict, Any
 from pathlib import Path
-from app.core.config import settings
+from app.core.config.settings import settings
+from app.core.logging.formatters import AuditFormatter
 
 def get_base_logging_config() -> Dict[str, Any]:
     """Base logging configuration with common settings."""
