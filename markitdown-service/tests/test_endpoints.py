@@ -262,7 +262,6 @@ class TestAuthAPI:
         )
         
         assert response.status_code == 403
-        # Update assertion to match actual error message
         assert response.json()["detail"] in ["Invalid API key", "API key validation failed"]
 
 if __name__ == "__main__":
