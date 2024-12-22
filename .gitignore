@@ -25,3 +25,6 @@ Thumbs.db
 
 # AI Dump
 ai_dump.md
+
+# Log files
+/logs*
