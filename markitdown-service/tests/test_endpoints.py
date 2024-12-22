@@ -61,9 +61,22 @@ class TestNoAuthAPI:
         
         assert response.status_code == 200
         content = response.text
-        assert "# " in content
-        assert "BBC" in content
-        assert "Published" in content
+        
+        # Check article title
+        assert "# Get on with fixing potholes, PM tells councils" in content
+        
+        # Check key details
+        assert "Prime Minister Sir Keir Starmer urged" in content
+        assert "£1.6bn budget" in content
+        assert "seven million potholes" in content
+        
+        # Check major sections exist
+        assert any(section in content for section in [
+            "## Get in touch",
+            "## Related topics",
+            "## References",
+            "## External links"
+        ])
 
     def test_convert_url_wikipedia_no_auth(self) -> None:
         """Test Wikipedia URL conversion without authentication"""
@@ -159,9 +172,22 @@ class TestAuthAPI:
         
         assert response.status_code == 200
         content = response.text
-        assert "# " in content
-        assert "BBC" in content
-        assert "Published" in content
+        
+        # Check article title
+        assert "# Get on with fixing potholes, PM tells councils" in content
+        
+        # Check key details
+        assert "Prime Minister Sir Keir Starmer urged" in content
+        assert "£1.6bn budget" in content
+        assert "seven million potholes" in content
+        
+        # Check major sections exist
+        assert any(section in content for section in [
+            "## Get in touch",
+            "## Related topics",
+            "## References",
+            "## External links"
+        ])
 
     def test_convert_url_wikipedia_with_key(self) -> None:
         """Test Wikipedia URL conversion with valid API key"""
