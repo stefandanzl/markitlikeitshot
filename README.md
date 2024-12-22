@@ -46,6 +46,18 @@ A FastAPI service wrapping Microsoft's [markitdown](https://github.com/microsoft
 ./run.sh test
 ```
 
+### Viewing the Logs
+```bash
+# View production container logs
+./run.sh -l prod
+
+# View development container logs
+./run.sh -l dev
+
+# View test container logs
+./run.sh -l test
+```
+
 ## API Endpoints
 
 ### Authentication
