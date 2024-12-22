@@ -70,6 +70,7 @@ services:
       volumes:
         - ./markitdown-service/app:/app/app
         - ./markitdown-service/tests:/app/tests
+        - ./markitdown-service/pytest.ini:/app/pytest.ini
         - type: volume
           source: markitdown_test_data
           target: /app/data
@@ -85,7 +86,7 @@ services:
         - ADMIN_API_KEY=test-admin-key
         - LOG_LEVEL=WARNING
       entrypoint: python -m pytest
-      command: tests/test_endpoints.py -v --capture=no  # Updated to use new test file
+      command: tests/test_endpoints.py -v --capture=no -c /app/pytest.ini
       profiles:
         - test
 
