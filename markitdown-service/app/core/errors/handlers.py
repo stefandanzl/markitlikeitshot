@@ -1,12 +1,14 @@
+# app/core/errors/handlers.py
 from functools import wraps
-from typing import Callable, Type, Optional, Dict, Tuple
-from fastapi import HTTPException, status
+from typing import Callable, Type, Optional, Dict, Tuple, List
+from fastapi import HTTPException, status, Request
 import requests
 import logging
 from app.core.audit import audit_log, AuditAction
 import time
 from app.core.errors.base import OperationError
 from app.core.errors.exceptions import FileProcessingError, ConversionError
+import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +30,17 @@ OPERATION_TO_AUDIT_ACTION = {
     "convert_url": AuditAction.CONVERT_URL,
 }
 
-def get_error_config(exception: Exception, error_map: Dict[Type[Exception], Tuple[int, Optional[str]]]) -> Tuple[int, Optional[str]]:
-    """Get error configuration for an exception."""
+def get_error_config(exception: Exception, error_map: Dict[Type[Exception], Tuple[int, Optional[str]]]) -> Tuple[Tuple[int, Optional[str]], Exception]:
+    """
+    Get error configuration for an exception.
+    
+    Args:
+        exception: The exception to get configuration for
+        error_map: Mapping of exception types to (status_code, message)
+    
+    Returns:
+        Tuple containing ((status_code, message), actual_exception)
+    """
     # Handle responses library exceptions
     if hasattr(exception, 'body') and isinstance(exception.body, Exception):
         actual_exception = exception.body
@@ -45,16 +56,70 @@ def get_error_config(exception: Exception, error_map: Dict[Type[Exception], Tupl
     status_code = getattr(actual_exception, 'status_code', 500)
     return (status_code, str(actual_exception)), actual_exception
 
+def get_validator_parameters(validator: Callable) -> set:
+    """Get the parameter names for a validator function."""
+    return {
+        param.name for param in inspect.signature(validator).parameters.values()
+        if param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)
+    }
+
+async def run_validators(
+    validators: List[Callable],
+    args: tuple,
+    kwargs: dict,
+    context: Optional[dict] = None
+) -> None:
+    """
+    Run a list of validators with given arguments.
+    
+    Args:
+        validators: List of validator functions to run
+        args: Positional arguments to pass to validators
+        kwargs: Keyword arguments to pass to validators
+        context: Optional context dictionary to pass to validators
+    """
+    if not validators:
+        return
+
+    for validator in validators:
+        # Get the parameters this validator accepts
+        valid_params = get_validator_parameters(validator)
+        
+        # Build validator kwargs with only the parameters it accepts
+        validator_kwargs = {
+            k: v for k, v in kwargs.items()
+            if k in valid_params
+        }
+        
+        # Add context if the validator accepts it
+        if context and 'context' in valid_params:
+            validator_kwargs['context'] = context.copy()
+        
+        # Find request object in args or kwargs if validator needs it
+        if 'request' in valid_params:
+            request = next(
+                (arg for arg in args if isinstance(arg, Request)),
+                kwargs.get('request')
+            )
+            if request:
+                validator_kwargs['request'] = request
+        
+        await validator(**validator_kwargs)
+
 def handle_api_operation(
     operation_name: str,
+    pre_validators: Optional[List[Callable]] = None,
+    post_validators: Optional[List[Callable]] = None,
     error_map: Optional[Dict[Type[Exception], Tuple[int, Optional[str]]]] = None,
     audit: bool = True
 ):
     """
-    Decorator for handling API operation errors consistently.
+    Enhanced decorator for handling API operation errors consistently.
     
     Args:
         operation_name: Name of the operation for logging
+        pre_validators: List of validation functions to run before main operation
+        post_validators: List of validation functions to run after main operation
         error_map: Mapping of exception types to (status_code, message)
                   Use None as message to pass through the original error message
         audit: Whether to create audit logs
@@ -75,11 +140,26 @@ def handle_api_operation(
             user_id = getattr(api_key, 'id', None)
             
             try:
+                # Create validation context
+                validation_context = {
+                    'operation_name': operation_name,
+                    'user_id': user_id,
+                    'start_time': start_time
+                }
+                
+                # Run pre-operation validators
+                await run_validators(pre_validators, args, kwargs, validation_context)
+                
                 # Log operation start
                 logger.info(f"Starting {operation_name}")
                 
                 # Execute operation
                 result = await func(*args, **kwargs)
+                
+                # Run post-operation validators
+                if post_validators:
+                    validation_context['result'] = result
+                    await run_validators(post_validators, args, kwargs, validation_context)
                 
                 # Calculate duration and log success
                 duration = time.time() - start_time
@@ -131,4 +211,9 @@ def handle_api_operation(
         return wrapper
     return decorator
 
-__all__ = ["handle_api_operation", "OperationError", "DEFAULT_ERROR_MAP"]
+__all__ = [
+    "handle_api_operation",
+    "OperationError",
+    "DEFAULT_ERROR_MAP",
+    "run_validators"
+]

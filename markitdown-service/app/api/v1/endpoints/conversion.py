@@ -15,6 +15,14 @@ from app.core.config.settings import settings
 from app.core.errors.handlers import handle_api_operation, DEFAULT_ERROR_MAP
 from app.core.errors.exceptions import FileProcessingError, ConversionError, ContentTypeError
 from app.core.rate_limiting.limiter import limiter
+from app.core.validation.validators import (
+    validate_file_size,
+    validate_file_extension,
+    validate_content_type,
+    validate_file_content,
+    validate_upload_file,
+    validate_text_input
+)
 
 # Initialize router
 router = APIRouter(tags=["conversion"])
@@ -38,23 +46,41 @@ class UrlInput(BaseModel):
     url: HttpUrl
     options: Optional[dict] = None
 
+# Endpoint-specific validators
+async def validate_text_request(request: Request, text_input: TextInput, **kwargs):
+    """Pre-validator for text conversion"""
+    await validate_text_input(
+        content=text_input.content.encode('utf-8'),
+        metadata={
+            "content_type": "text/html",
+            "content_length": len(text_input.content)
+        }
+    )
+
+async def validate_file_request(request: Request, file: UploadFile, **kwargs):
+    """Pre-validator for file conversion"""
+    return await validate_upload_file(file=file)
+
+async def validate_url_request(response: requests.Response, **kwargs):
+    """Validator for URL response"""
+    content_type = response.headers.get('content-type', '')
+    validate_content_type(content_type)
+    validate_file_size(response.content)
+
 def log_conversion_attempt(
     conversion_type: str,
     metadata: Dict[str, Any],
     user_id: Optional[str] = None
 ) -> None:
     """Log conversion attempt with metadata."""
-    # Create a new dict for logging to avoid modifying the original metadata
     log_data = {
         "conversion_type": conversion_type,
         "user_id": user_id,
     }
     
-    # Add metadata with safe key names
     for key, value in metadata.items():
-        # Avoid using reserved logging field names
         if key == 'filename':
-            log_data['input_filename'] = value  # Rename to avoid conflict
+            log_data['input_filename'] = value
         else:
             log_data[key] = value
 
@@ -71,16 +97,13 @@ def log_conversion_result(
     error: Optional[Exception] = None
 ) -> None:
     """Log conversion result with performance metrics."""
-    # Create safe log data
     log_data = {
         "conversion_type": conversion_type,
         "success": success,
         "duration_ms": round(duration * 1000, 2),
     }
 
-    # Add metadata with safe key names
     for key, value in metadata.items():
-        # Avoid using reserved logging field names
         if key == 'filename':
             log_data['input_filename'] = value
         else:
@@ -90,13 +113,11 @@ def log_conversion_result(
         log_data["error"] = str(error)
         log_data["error_type"] = error.__class__.__name__
 
-    # Log to performance logger
     perf_logger.info(
         f"{conversion_type} conversion completed",
         extra=log_data
     )
 
-    # Log to main logger with appropriate level
     if success:
         logger.info(f"{conversion_type} conversion successful", extra=log_data)
     else:
@@ -105,16 +126,6 @@ def log_conversion_result(
 @contextmanager
 def save_temp_file(content: bytes, suffix: str) -> str:
     """Save content to a temporary file and return the file path."""
-    if len(content) > settings.MAX_FILE_SIZE:
-        logger.warning(
-            "File size limit exceeded",
-            extra={
-                "size": len(content),
-                "limit": settings.MAX_FILE_SIZE
-            }
-        )
-        raise FileProcessingError(f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes")
-
     temp_file_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, mode='w+b', delete=False) as temp_file:
@@ -175,7 +186,6 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         return result.text_content
 
     except ConversionError:
-        # Re-raise ConversionError directly
         raise
     except Exception as e:
         duration = time.time() - start_time
@@ -193,13 +203,7 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
 def get_rate_limit_headers(request: Request) -> dict:
     """Get rate limit headers from request state"""
     now = int(time.time())
-    if settings.RATE_LIMIT_PERIOD == "minute":
-        window_seconds = 60
-    elif settings.RATE_LIMIT_PERIOD == "hour":
-        window_seconds = 3600
-    else:
-        window_seconds = 60  # Default to minute if unknown period
-        
+    window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
     window_reset = now + window_seconds
     
     return {
@@ -213,6 +217,7 @@ def get_rate_limit_headers(request: Request) -> dict:
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_text",
+    pre_validators=[validate_text_request],
     error_map={
         FileProcessingError: (status.HTTP_400_BAD_REQUEST, None),
         ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
@@ -225,38 +230,38 @@ async def convert_text(
     api_key: str = Depends(get_api_key)
 ):
     """Convert text or HTML to markdown."""
-    conversion_metadata = {
-        "content_length": len(text_input.content),
-        "has_options": bool(text_input.options)
-    }
+    log_conversion_attempt(
+        "text",
+        {
+            "content_length": len(text_input.content),
+            "has_options": bool(text_input.options)
+        },
+        getattr(api_key, 'id', None)
+    )
     
-    # Process the conversion
     with save_temp_file(text_input.content.encode('utf-8'), suffix='.html') as temp_file_path:
         markdown_content = process_conversion(temp_file_path, '.html')
         headers = get_rate_limit_headers(request)
         return RateLimitedResponse(content=markdown_content, headers=headers)
 
 @router.post("/convert/file", response_class=RateLimitedResponse)
+@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_file",
+    pre_validators=[validate_file_request],
     error_map={
         ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
         **DEFAULT_ERROR_MAP
     }
 )
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 async def convert_file(
     request: Request,
     file: UploadFile = File(...),
     api_key: str = Depends(get_api_key)
 ) -> RateLimitedResponse:
-    """
-    Convert an uploaded file to markdown.
-    """
-    # Extract file information
-    _, ext = os.path.splitext(file.filename)
+    """Convert an uploaded file to markdown."""
+    ext, content = await validate_upload_file(file=file)
     
-    # Log conversion attempt with metadata
     log_conversion_attempt(
         "file",
         {
@@ -267,23 +272,6 @@ async def convert_file(
         }
     )
     
-    # Validate file extension - this should return 400 for invalid types
-    if ext.lower() not in settings.SUPPORTED_EXTENSIONS:
-        raise FileProcessingError(f"Unsupported file type: {ext}")
-
-    # Read and validate file content
-    content = await file.read()
-    if not content:
-        raise FileProcessingError("Empty file provided")
-    
-    # Check file size
-    file_size = len(content)
-    if file_size > settings.MAX_FILE_SIZE:
-        raise FileProcessingError(
-            f"File size exceeds maximum limit of {settings.MAX_FILE_SIZE} bytes"
-        )
-
-    # Process the conversion
     with save_temp_file(content, suffix=ext) as temp_file_path:
         markdown_content = process_conversion(
             temp_file_path,
@@ -291,7 +279,6 @@ async def convert_file(
             content_type=file.content_type
         )
         
-        # Get rate limit headers and return response
         headers = get_rate_limit_headers(request)
         return RateLimitedResponse(
             content=markdown_content,
@@ -317,10 +304,7 @@ async def convert_url(
     url_input: UrlInput,
     api_key: str = Depends(get_api_key)
 ) -> RateLimitedResponse:
-    """
-    Fetch a URL and convert its content to markdown.
-    """
-    # Log conversion attempt with metadata
+    """Fetch a URL and convert its content to markdown."""
     log_conversion_attempt(
         "url",
         {
@@ -330,7 +314,6 @@ async def convert_url(
         }
     )
 
-    # Fetch URL content - exceptions will be handled by the decorator
     response = requests.get(
         str(url_input.url),
         headers={
@@ -343,12 +326,8 @@ async def convert_url(
     )
     response.raise_for_status()
     
-    # Validate content type
-    content_type = response.headers.get('content-type', '')
-    if not content_type.startswith(('text/html', 'application/xhtml+xml')):
-        raise ContentTypeError(content_type)
+    await validate_url_request(response)
 
-    # Process the conversion
     with save_temp_file(response.content, suffix='.html') as temp_file_path:
         markdown_content = process_conversion(
             temp_file_path,
@@ -356,7 +335,6 @@ async def convert_url(
             url=str(url_input.url)
         )
         
-        # Get rate limit headers and return response
         headers = get_rate_limit_headers(request)
         return RateLimitedResponse(
             content=markdown_content,
