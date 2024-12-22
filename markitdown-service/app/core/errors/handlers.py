@@ -21,6 +21,23 @@ DEFAULT_ERROR_MAP = {
     Exception: (status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
 }
 
+def get_error_config(exception: Exception, error_map: Dict[Type[Exception], Tuple[int, Optional[str]]]) -> Tuple[int, Optional[str]]:
+    """Get error configuration for an exception."""
+    # Handle responses library exceptions
+    if hasattr(exception, 'body') and isinstance(exception.body, Exception):
+        actual_exception = exception.body
+    else:
+        actual_exception = exception
+
+    # Find most specific error mapping
+    for exc_type, config in error_map.items():
+        if isinstance(actual_exception, exc_type):
+            return config, actual_exception
+    
+    # Default error handling
+    status_code = getattr(actual_exception, 'status_code', 500)
+    return (status_code, str(actual_exception)), actual_exception
+
 def handle_api_operation(
     operation_name: str,
     error_map: Optional[Dict[Type[Exception], Tuple[int, Optional[str]]]] = None,
@@ -47,108 +64,60 @@ def handle_api_operation(
         @wraps(func)
         async def wrapper(*args, **kwargs):
             start_time = time.time()
+            api_key = kwargs.get('api_key', {})
+            user_id = getattr(api_key, 'id', None)
             
             try:
-                # Get user_id from kwargs if available (api_key dependency)
-                api_key = kwargs.get('api_key', {})
-                user_id = getattr(api_key, 'id', None)
-                
                 # Log operation start
                 logger.info(f"Starting {operation_name}")
                 
                 # Execute operation
                 result = await func(*args, **kwargs)
                 
-                # Calculate duration
+                # Calculate duration and log success
                 duration = time.time() - start_time
-                
-                # Log success
-                logger.info(
-                    f"Completed {operation_name}",
-                    extra={"duration": duration}
-                )
+                logger.info(f"Completed {operation_name}", extra={"duration": duration})
                 
                 # Audit successful operation
                 if audit:
                     audit_log(
                         action=operation_name,
                         user_id=user_id,
-                        details={
-                            "duration": duration,
-                            "status": "success"
-                        }
+                        details={"duration": duration, "status": "success"}
                     )
                 
                 return result
                 
             except Exception as e:
-                # Handle all exceptions uniformly
                 duration = time.time() - start_time
-
-                # Special handling for responses library exceptions
-                if hasattr(e, 'body') and isinstance(e.body, Exception):
-                    actual_exception = e.body
-                    error_type = type(actual_exception)
-                else:
-                    actual_exception = e
-                    error_type = type(e)
+                (status_code, message), actual_exception = get_error_config(e, final_error_map)
                 
-                # Find most specific error mapping
-                error_config = None
-                for exc_type, config in final_error_map.items():
-                    if isinstance(actual_exception, exc_type):
-                        error_config = config
-                        break
+                # Use original error message if message is None
+                detail = str(actual_exception) if message is None else message
                 
-                if error_config:
-                    status_code, message = error_config
-                    # Use original error message if message is None
-                    detail = str(actual_exception) if message is None else message
-                else:
-                    status_code = getattr(actual_exception, 'status_code', 500)
-                    detail = str(actual_exception)
-
-                # Log at appropriate level
+                # Log at appropriate level with consistent format
+                log_data = {
+                    "duration": duration,
+                    "error_type": actual_exception.__class__.__name__,
+                    "error_message": str(actual_exception),
+                    "status_code": status_code
+                }
+                
                 if status_code >= 500:
-                    logger.exception(
-                        f"{operation_name} failed",
-                        extra={
-                            "duration": duration,
-                            "error_type": error_type.__name__,
-                            "error_message": str(actual_exception),
-                            "status_code": status_code
-                        }
-                    )
+                    logger.exception(f"{operation_name} failed", extra=log_data)
                 else:
-                    logger.warning(
-                        f"{operation_name} error",
-                        extra={
-                            "duration": duration,
-                            "error_type": error_type.__name__,
-                            "error_message": str(actual_exception),
-                            "status_code": status_code
-                        }
-                    )
+                    logger.warning(f"{operation_name} error", extra=log_data)
                 
-                # Audit error
+                # Audit error with consistent format
                 if audit:
                     audit_log(
                         action=operation_name,
                         user_id=user_id,
-                        details={
-                            "error": str(actual_exception),
-                            "error_type": error_type.__name__,
-                            "duration": duration,
-                            "status_code": status_code
-                        },
+                        details={**log_data, "error": str(actual_exception)},
                         status="failure"
                     )
                 
-                # Raise HTTP exception with appropriate status and detail
-                raise HTTPException(
-                    status_code=status_code,
-                    detail=detail
-                )
+                raise HTTPException(status_code=status_code, detail=detail)
                 
         return wrapper
     return decorator

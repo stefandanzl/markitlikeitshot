@@ -19,6 +19,10 @@ def get_base_logging_config() -> Dict[str, Any]:
             "detailed": {
                 "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
                 "datefmt": "%Y-%m-%d %H:%M:%S"
+            },
+            "sql": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S"
             }
         },
         "handlers": {
@@ -35,6 +39,14 @@ def get_base_logging_config() -> Dict[str, Any]:
                 "backupCount": settings.LOG_BACKUP_COUNT,
                 "encoding": settings.LOG_ENCODING
             },
+            "sql_file": {
+                "class": "logging.handlers.TimedRotatingFileHandler",
+                "formatter": "sql",
+                "filename": f"{settings.LOG_DIR}/sql_{settings.ENVIRONMENT}.log",
+                "when": settings.LOG_ROTATION,
+                "backupCount": settings.LOG_BACKUP_COUNT,
+                "encoding": settings.LOG_ENCODING
+            },
             "null": {
                 "class": "logging.NullHandler"
             }
@@ -45,9 +57,19 @@ def get_base_logging_config() -> Dict[str, Any]:
                 "level": "DEBUG",
                 "propagate": False
             },
-            "sqlalchemy": {
-                "handlers": ["file"],
-                "level": "INFO",
+            "sqlalchemy.engine": {
+                "handlers": ["sql_file"],
+                "level": settings.get_component_log_level("sqlalchemy.engine"),
+                "propagate": False
+            },
+            "sqlalchemy.pool": {
+                "handlers": ["sql_file"],
+                "level": settings.get_component_log_level("sqlalchemy.pool"),
+                "propagate": False
+            },
+            "sqlalchemy.dialects": {
+                "handlers": ["sql_file"],
+                "level": settings.get_component_log_level("sqlalchemy.dialects"),
                 "propagate": False
             }
         }
@@ -74,6 +96,9 @@ def get_web_logging_config() -> Dict[str, Any]:
         })
         # Disable file logging in test environment
         config["handlers"]["file"] = {
+            "class": "logging.NullHandler"
+        }
+        config["handlers"]["sql_file"] = {
             "class": "logging.NullHandler"
         }
     
@@ -121,18 +146,11 @@ def get_cli_logging_config(quiet: bool = False) -> Dict[str, Any]:
     # Add CLI specific handlers
     log_dir = Path(settings.LOG_DIR)
     cli_log_file = log_dir / f"cli_{settings.ENVIRONMENT}.log"
-    sql_log_file = log_dir / f"sql_{settings.ENVIRONMENT}.log"
     
     config["handlers"].update({
         "cli_file": {
             "class": "logging.FileHandler",
             "filename": str(cli_log_file),
-            "formatter": "detailed",
-            "level": "DEBUG"
-        },
-        "sql_file": {
-            "class": "logging.FileHandler",
-            "filename": str(sql_log_file),
             "formatter": "detailed",
             "level": "DEBUG"
         }
@@ -148,4 +166,3 @@ def get_cli_logging_config(quiet: bool = False) -> Dict[str, Any]:
     })
     
     return config
-
