@@ -11,9 +11,7 @@ services:
       - type: volume
         source: markitdown_dev_data
         target: /app/data
-      - type: volume
-        source: markitdown_dev_logs
-        target: /app/logs
+      - ./markitdown-service/logs:/app/logs
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=sqlite:///./data/dev_api_keys.db
@@ -42,9 +40,7 @@ services:
       - type: volume
         source: markitdown_prod_data
         target: /app/data
-      - type: volume
-        source: markitdown_prod_logs
-        target: /app/logs
+      - ./markitdown-service/logs:/app/logs
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=sqlite:///./data/api_keys.db
@@ -74,9 +70,7 @@ services:
         - type: volume
           source: markitdown_test_data
           target: /app/data
-        - type: volume
-          source: markitdown_test_logs
-          target: /app/logs
+        - ./markitdown-service/logs:/app/logs
       environment:
         - ENVIRONMENT=test
         - PYTHONPATH=/app
@@ -93,16 +87,10 @@ services:
 volumes:
   markitdown_dev_data:
     name: markitdown_dev_data
-  markitdown_dev_logs:
-    name: markitdown_dev_logs
   markitdown_prod_data:
     name: markitdown_prod_data
-  markitdown_prod_logs:
-    name: markitdown_prod_logs
   markitdown_test_data:
     name: markitdown_test_data
-  markitdown_test_logs:
-    name: markitdown_test_logs
 
 networks:
   default:
