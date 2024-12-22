@@ -27,4 +27,5 @@ Thumbs.db
 ai_dump.md
 
 # Log files
-/logs*
+/logs/*
+!logs/.gitkeep
