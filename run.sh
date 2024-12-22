@@ -9,6 +9,8 @@ FOLLOW_LOGS=false
 CLEAN=false
 CLEAN_ALL=false
 FORCE=false
+SHELL=false  # New option for shell access
+INTERACTIVE=false  # New option for interactive CLI
 
 # Colors for better visibility
 declare -A COLORS=(
@@ -65,6 +67,59 @@ docker_compose() {
     fi
 }
 
+# Function to run interactive CLI
+run_interactive_cli() {
+    local env=$1
+    local service="${ENV_CONFIGS[$env]}"
+    
+    if [ -z "$service" ]; then
+        print_colored "RED" "Invalid environment: $env"
+        return 1
+    fi
+
+    # Check if the container is running
+    if ! docker_compose --profile $env ps | grep -q "markitlikeitshot-${service}"; then
+        print_colored "RED" "Container for $env environment is not running"
+        print_colored "YELLOW" "Starting container first..."
+        start_environment "$env"
+    fi
+
+    print_colored "GREEN" "Starting interactive CLI for ${env} environment..."
+    
+    # Execute interactive CLI command in the container
+    docker_compose --profile $env exec $service python manage.py interactive
+}
+
+# Function to access container shell
+access_shell() {
+    local env=$1
+    local service="${ENV_CONFIGS[$env]}"
+    
+    if [ -z "$service" ]; then
+        print_colored "RED" "Invalid environment: $env"
+        return 1
+    fi
+
+    # Check if the container is running
+    if ! docker_compose --profile $env ps | grep -q "markitlikeitshot-${service}"; then
+        print_colored "RED" "Container for $env environment is not running"
+        print_colored "YELLOW" "Start the container first with: $0 $env"
+        return 1
+    fi
+
+    print_colored "GREEN" "Accessing shell for ${env} environment..."
+    print_colored "YELLOW" "Type 'exit' to leave the shell"
+    
+    # Execute interactive shell in the container
+    docker_compose --profile $env exec $service /bin/bash || {
+        # If bash is not available, try sh
+        docker_compose --profile $env exec $service /bin/sh || {
+            print_colored "RED" "Failed to access shell. Neither bash nor sh are available."
+            return 1
+        }
+    }
+}
+
 # Function to show logs
 show_logs() {
     local env=${1:-$ENVIRONMENT}
@@ -104,7 +159,7 @@ clean_environment() {
     if [ -z "$service" ]; then
         print_colored "RED" "Invalid environment: $env"
         return 1
-    fi  # <-- This was the problem (had an extra })
+    fi
 
     # Extra confirmation for production
     if [ "$env" = "prod" ] && [ "$force" != true ]; then
@@ -201,6 +256,8 @@ Options:
   -F, --follow     Show and follow logs for the environment
   -c, --clean      Clean environment (delete containers, volumes, etc.)
   -C, --clean-all  Clean all environments
+  -s, --shell      Access interactive shell in the container
+  -i, --interactive Launch interactive CLI directly
   --force          Force clean without confirmation (dangerous!)
   -h, --help       Display this help message
 
@@ -217,7 +274,8 @@ Examples:
   $0 -F prod         # Follow production logs
   $0 -c dev          # Clean development environment
   $0 -C              # Clean all environments
-  $0 -c prod         # Clean production (requires confirmation)
+  $0 -s dev          # Access shell in development container
+  $0 -i dev          # Launch interactive CLI in development environment
 EOF
 }
 
@@ -389,6 +447,14 @@ main() {
                     CLEAN_ALL=true
                     shift
                     ;;
+                -s|--shell)
+                    SHELL=true
+                    shift
+                    ;;
+                -i|--interactive)
+                    INTERACTIVE=true
+                    shift
+                    ;;
                 --force)
                     FORCE=true
                     shift
@@ -425,6 +491,24 @@ main() {
 
         if [ "$SHOW_LOGS" = true ]; then
             show_logs "$ENVIRONMENT" "$FOLLOW_LOGS"
+            exit 0
+        fi
+
+        if [ "$SHELL" = true ]; then
+            if [ -z "$ENVIRONMENT" ]; then
+                print_colored "RED" "Error: Environment must be specified for shell access"
+                exit 1
+            fi
+            access_shell "$ENVIRONMENT"
+            exit 0
+        fi
+
+        if [ "$INTERACTIVE" = true ]; then
+            if [ -z "$ENVIRONMENT" ]; then
+                print_colored "RED" "Error: Environment must be specified for interactive CLI"
+                exit 1
+            fi
+            run_interactive_cli "$ENVIRONMENT"
             exit 0
         fi
     else
