@@ -1,12 +1,14 @@
 # markitdown-service/tests/conftest.py
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import SQLModel, delete, Session
+from sqlmodel import SQLModel, delete, Session, select
 from app.main import app
 from app.core.config import settings
 from app.db.session import get_db_session, get_engine
 from app.core.security.api_key import create_api_key
+from app.core.security.user import create_user
 from app.models.auth.api_key import Role, APIKey
+from app.models.auth.user import User, UserStatus
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_db():
@@ -41,26 +43,45 @@ def auth_client(db_session):
     settings.API_KEY_AUTH_ENABLED = True
     client = TestClient(app)
     
-    # Clean up any existing test users
+    # Clean up any existing test users and keys
     db_session.exec(delete(APIKey).where(APIKey.name.in_(["test-user", "test-admin"])))
+    db_session.exec(delete(User).where(User.email.in_(["test-user@example.com", "test-admin@example.com"])))
     db_session.commit()
+    
+    # Create test users
+    test_user = create_user(
+        db=db_session,
+        name="Test User",
+        email="test-user@example.com"
+    )
+    
+    admin_user = create_user(
+        db=db_session,
+        name="Test Admin",
+        email="test-admin@example.com"
+    )
     
     # Create test API keys
     api_key = create_api_key(
         db=db_session,
         name="test-user",
-        role=Role.USER
+        role=Role.USER,
+        user_id=test_user.id
     )
+    
     admin_key = create_api_key(
         db=db_session,
         name="test-admin",
-        role=Role.ADMIN
+        role=Role.ADMIN,
+        user_id=admin_user.id
     )
+    
     db_session.commit()
     
     yield client, api_key.key, admin_key.key
     
     # Cleanup
     db_session.exec(delete(APIKey).where(APIKey.name.in_(["test-user", "test-admin"])))
+    db_session.exec(delete(User).where(User.email.in_(["test-user@example.com", "test-admin@example.com"])))
     db_session.commit()
     settings.API_KEY_AUTH_ENABLED = original_auth_setting
