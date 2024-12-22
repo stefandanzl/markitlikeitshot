@@ -99,7 +99,7 @@ def get_base_logging_config() -> Dict[str, Any]:
         "loggers": {
             "app": {
                 "handlers": ["console", "file"],
-                "level": "DEBUG",
+                "level": settings.get_log_level,
                 "propagate": False
             },
             "sqlalchemy.engine": {
@@ -137,7 +137,7 @@ def get_web_logging_config() -> Dict[str, Any]:
         }
         config["handlers"]["console"].update({
             "formatter": "test",
-            "level": "ERROR"  # Only show ERROR and above in tests
+            "level": "ERROR"  # Show ERROR and above in tests
         })
         # Disable file logging in test environment
         config["handlers"]["file"] = {
@@ -151,28 +151,28 @@ def get_web_logging_config() -> Dict[str, Any]:
     config["loggers"].update({
         "uvicorn": {
             "handlers": ["console"],
-            "level": "WARNING" if settings.ENVIRONMENT == "test" else "INFO",
+            "level": settings.get_component_log_level("uvicorn"),
             "propagate": False
         },
         "uvicorn.error": {
             "handlers": ["console"],
-            "level": "WARNING" if settings.ENVIRONMENT == "test" else "INFO",
+            "level": settings.get_component_log_level("uvicorn.error"),
             "propagate": False
         },
         "uvicorn.access": {
             "handlers": ["null"],
-            "level": "WARNING",
+            "level": settings.get_component_log_level("uvicorn.access"),
             "propagate": False
         },
         # Configure app loggers
         "app": {
             "handlers": ["console", "file"],
-            "level": "ERROR" if settings.ENVIRONMENT == "test" else "DEBUG",
+            "level": settings.get_log_level,
             "propagate": False
         },
         "app.api": {
             "handlers": ["console", "file"],
-            "level": "ERROR" if settings.ENVIRONMENT == "test" else "DEBUG",
+            "level": settings.get_log_level,
             "propagate": False
         }
     })
@@ -200,7 +200,7 @@ def get_cli_logging_config(quiet: bool = False) -> Dict[str, Any]:
     config["loggers"].update({
         "app.cli": {
             "handlers": ["console", "cli_file"],
-            "level": "DEBUG",
+            "level": settings.get_component_log_level("app.cli"),
             "propagate": False
         }
     })
