@@ -1,10 +1,63 @@
 from typing import Dict, Any
 from pathlib import Path
+import logging.handlers
+import fcntl
+import gzip
+import shutil
+from datetime import datetime
 from app.core.config.settings import settings
 from app.core.logging.formatters import AuditFormatter
 
+class SafeRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
+    """Thread and process-safe rotating file handler with compression."""
+    
+    def __init__(self, filename: str, **kwargs):
+        super().__init__(filename, **kwargs)
+        self.rotator = self._rotator
+        
+    def _rotator(self, source: str, dest: str) -> None:
+        """Custom rotator that adds file locking and compression."""
+        with open(source, 'a') as f:
+            try:
+                # Acquire exclusive lock
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                
+                # Perform rotation
+                if Path(dest).exists():
+                    Path(dest).unlink()
+                Path(source).rename(dest)
+                
+                # Compress the rotated file
+                with open(dest, 'rb') as f_in:
+                    gz_path = f"{dest}.gz"
+                    with gzip.open(gz_path, 'wb') as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                
+                # Remove the uncompressed rotated file
+                Path(dest).unlink()
+                
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+def get_file_handler(filename: str, formatter: str = "detailed") -> Dict[str, Any]:
+    """Get a safe rotating file handler configuration."""
+    return {
+        "class": "app.core.logging.config.SafeRotatingFileHandler",
+        "formatter": formatter,
+        "filename": filename,
+        "when": settings.LOG_ROTATION,
+        "interval": 1,
+        "backupCount": settings.LOG_BACKUP_COUNT,
+        "encoding": settings.LOG_ENCODING,
+        "delay": False,
+        "utc": True
+    }
+
 def get_base_logging_config() -> Dict[str, Any]:
     """Base logging configuration with common settings."""
+    # Ensure log directory exists
+    Path(settings.LOG_DIR).mkdir(parents=True, exist_ok=True)
+    
     return {
         "version": 1,
         "disable_existing_loggers": False,
@@ -31,22 +84,14 @@ def get_base_logging_config() -> Dict[str, Any]:
                 "formatter": "default",
                 "level": settings.get_log_level
             },
-            "file": {
-                "class": "logging.handlers.TimedRotatingFileHandler",
-                "formatter": "detailed",
-                "filename": f"{settings.LOG_DIR}/app_{settings.ENVIRONMENT}.log",
-                "when": settings.LOG_ROTATION,
-                "backupCount": settings.LOG_BACKUP_COUNT,
-                "encoding": settings.LOG_ENCODING
-            },
-            "sql_file": {
-                "class": "logging.handlers.TimedRotatingFileHandler",
-                "formatter": "sql",
-                "filename": f"{settings.LOG_DIR}/sql_{settings.ENVIRONMENT}.log",
-                "when": settings.LOG_ROTATION,
-                "backupCount": settings.LOG_BACKUP_COUNT,
-                "encoding": settings.LOG_ENCODING
-            },
+            "file": get_file_handler(
+                f"{settings.LOG_DIR}/app_{settings.ENVIRONMENT}.log",
+                "detailed"
+            ),
+            "sql_file": get_file_handler(
+                f"{settings.LOG_DIR}/sql_{settings.ENVIRONMENT}.log",
+                "sql"
+            ),
             "null": {
                 "class": "logging.NullHandler"
             }
@@ -148,12 +193,7 @@ def get_cli_logging_config(quiet: bool = False) -> Dict[str, Any]:
     cli_log_file = log_dir / f"cli_{settings.ENVIRONMENT}.log"
     
     config["handlers"].update({
-        "cli_file": {
-            "class": "logging.FileHandler",
-            "filename": str(cli_log_file),
-            "formatter": "detailed",
-            "level": "DEBUG"
-        }
+        "cli_file": get_file_handler(str(cli_log_file), "detailed")
     })
     
     # Update loggers for CLI

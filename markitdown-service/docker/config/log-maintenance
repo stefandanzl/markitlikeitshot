@@ -1,0 +1,3 @@
+#!/bin/sh
+/usr/sbin/logrotate /etc/logrotate.d/markitdown
+/usr/local/bin/python /app/manage.py logs cleanup
