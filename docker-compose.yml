@@ -4,6 +4,9 @@ services:
     build: 
       context: ./markitdown-service
       dockerfile: Dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
     ports:
       - "8000:8000"
     volumes:
@@ -11,7 +14,7 @@ services:
       - type: volume
         source: markitdown_dev_data
         target: /app/data
-      - ./markitdown-service/logs:/app/logs
+      - ./markitdown-service/logs:/app/logs  # Local log access
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=sqlite:///./data/dev_api_keys.db
@@ -19,7 +22,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-dev-admin-key}
       - LOG_LEVEL=DEBUG
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    entrypoint: ["/app/start.sh"]
+    command: ["--reload"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -40,7 +44,9 @@ services:
       - type: volume
         source: markitdown_prod_data
         target: /app/data
-      - ./markitdown-service/logs:/app/logs
+      - type: volume
+        source: markitdown_prod_logs
+        target: /app/logs
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=sqlite:///./data/api_keys.db
@@ -48,7 +54,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-default-secret-key-change-in-production}
       - ADMIN_API_KEY=${ADMIN_API_KEY:-admin-key-change-in-production}
       - LOG_LEVEL=INFO
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    entrypoint: ["/app/start.sh"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -60,35 +66,40 @@ services:
         
   # Test service
   markitdown-test:
-      build: 
-        context: ./markitdown-service
-        dockerfile: Dockerfile
-      volumes:
-        - ./markitdown-service/app:/app/app
-        - ./markitdown-service/tests:/app/tests
-        - ./markitdown-service/pytest.ini:/app/pytest.ini
-        - type: volume
-          source: markitdown_test_data
-          target: /app/data
-        - ./markitdown-service/logs:/app/logs
-      environment:
-        - ENVIRONMENT=test
-        - PYTHONPATH=/app
-        - DATABASE_URL=sqlite:///./data/test_api_keys.db
-        - API_KEY_AUTH_ENABLED=true
-        - SECRET_KEY=test-secret-key
-        - ADMIN_API_KEY=test-admin-key
-        - LOG_LEVEL=WARNING
-      entrypoint: python -m pytest
-      command: tests/test_endpoints.py -v --capture=no -c /app/pytest.ini
-      profiles:
-        - test
+    build: 
+      context: ./markitdown-service
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
+    volumes:
+      - ./markitdown-service/app:/app/app
+      - ./markitdown-service/tests:/app/tests
+      - ./markitdown-service/pytest.ini:/app/pytest.ini
+      - type: volume
+        source: markitdown_test_data
+        target: /app/data
+      - ./markitdown-service/logs:/app/logs  # Local log access for test analysis
+    environment:
+      - ENVIRONMENT=test
+      - PYTHONPATH=/app
+      - DATABASE_URL=sqlite:///./data/test_api_keys.db
+      - API_KEY_AUTH_ENABLED=true
+      - SECRET_KEY=test-secret-key
+      - ADMIN_API_KEY=test-admin-key
+      - LOG_LEVEL=WARNING
+    entrypoint: python -m pytest
+    command: tests/test_endpoints.py -v --capture=no -c /app/pytest.ini
+    profiles:
+      - test
 
 volumes:
   markitdown_dev_data:
     name: markitdown_dev_data
   markitdown_prod_data:
     name: markitdown_prod_data
+  markitdown_prod_logs:
+    name: markitdown_prod_logs
   markitdown_test_data:
     name: markitdown_test_data
 
