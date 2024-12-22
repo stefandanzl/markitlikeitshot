@@ -1,6 +1,6 @@
 # app/core/config.py
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any
 import os
 from functools import lru_cache
@@ -83,6 +83,10 @@ class Settings(BaseSettings):
 
     # Initial Setup Settings
     INITIAL_ADMIN_NAME: str = os.getenv("INITIAL_ADMIN_NAME", "System Admin")
+    INITIAL_ADMIN_EMAIL: str = os.getenv(
+        "INITIAL_ADMIN_EMAIL", 
+        "admin@example.com"
+    )
 
     # Security Settings
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")

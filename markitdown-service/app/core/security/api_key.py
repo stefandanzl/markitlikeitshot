@@ -7,6 +7,7 @@ from fastapi.security.api_key import APIKeyHeader
 from starlette.status import HTTP_403_FORBIDDEN
 from sqlmodel import Session, select
 from app.models.auth.api_key import APIKey, Role
+from app.models.auth.user import User, UserStatus
 from app.core.config import settings
 from app.db.session import get_db
 from app.utils.audit import audit_log
@@ -36,18 +37,28 @@ def verify_key_hash(key: str, hashed_key: str) -> bool:
 def create_api_key(
     db: Session,
     name: str,
+    user_id: int,
     role: Role = Role.USER,
-    created_by: Optional[int] = None
 ) -> APIKey:
     """Create a new API key."""
     try:
-        # Check for existing key
+        # Check if user exists and is active
+        user = db.get(User, user_id)
+        if not user:
+            raise ValueError(f"User with ID {user_id} does not exist")
+        if user.status != UserStatus.ACTIVE:
+            raise ValueError(f"User {user.name} is not active")
+
+        # Check for existing key with same name for this user
         existing = db.exec(
-            select(APIKey).where(APIKey.name == name)
+            select(APIKey).where(
+                APIKey.name == name,
+                APIKey.user_id == user_id
+            )
         ).first()
         
         if existing:
-            raise ValueError(f"API key with name '{name}' already exists")
+            raise ValueError(f"API key with name '{name}' already exists for this user")
 
         # Generate and hash the key
         original_key = generate_api_key()
@@ -58,7 +69,7 @@ def create_api_key(
             key=hashed_key,
             name=name,
             role=role,
-            created_by=created_by
+            user_id=user_id
         )
         
         # Add to session and flush to get the ID
@@ -68,8 +79,12 @@ def create_api_key(
         # Audit logging
         audit_log(
             action="create_api_key",
-            user_id=str(created_by),
-            details=f"Created API key for {name} with role {role}"
+            user_id=str(user_id),
+            details={
+                "key_name": name,
+                "role": role.value,
+                "user_name": user.name
+            }
         )
         
         # Create response object with unhashed key
@@ -79,7 +94,7 @@ def create_api_key(
             name=api_key.name,
             role=api_key.role,
             created_at=api_key.created_at,
-            created_by=api_key.created_by,
+            user_id=user_id,
             is_active=api_key.is_active,
             last_used=None
         )
@@ -93,8 +108,14 @@ def create_api_key(
 def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
     """Verify an API key and update last used timestamp."""
     try:
+        # Get all active keys for active users
         api_keys = db.exec(
-            select(APIKey).where(APIKey.is_active == True)
+            select(APIKey)
+            .join(User)
+            .where(
+                APIKey.is_active == True,
+                User.status == UserStatus.ACTIVE
+            )
         ).all()
         
         for api_key in api_keys:
@@ -105,8 +126,11 @@ def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
                 # Audit logging
                 audit_log(
                     action="api_key_used",
-                    user_id=str(api_key.id),
-                    details=f"API key '{api_key.name}' used"
+                    user_id=str(api_key.user_id),
+                    details={
+                        "key_name": api_key.name,
+                        "key_id": api_key.id
+                    }
                 )
                 return api_key
         
@@ -116,19 +140,27 @@ def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
         logger.exception("Failed to verify API key")
         raise
 
-def deactivate_api_key(db: Session, key_id: int, deactivated_by: Optional[int] = None) -> bool:
+def deactivate_api_key(
+    db: Session,
+    key_id: int,
+    deactivated_by_user_id: Optional[int] = None
+) -> bool:
     """Deactivate an API key."""
     try:
         api_key = db.get(APIKey, key_id)
         if api_key:
             api_key.is_active = False
-            db.flush()  # Ensure change is reflected
+            db.flush()
             
             # Audit logging
             audit_log(
                 action="deactivate_api_key",
-                user_id=str(deactivated_by),
-                details=f"Deactivated API key {api_key.name}"
+                user_id=str(deactivated_by_user_id),
+                details={
+                    "key_id": key_id,
+                    "key_name": api_key.name,
+                    "owner_id": api_key.user_id
+                }
             )
             return True
         return False
@@ -137,19 +169,32 @@ def deactivate_api_key(db: Session, key_id: int, deactivated_by: Optional[int] =
         logger.exception(f"Failed to deactivate API key {key_id}")
         raise
 
-def reactivate_api_key(db: Session, key_id: int, reactivated_by: Optional[int] = None) -> bool:
+def reactivate_api_key(
+    db: Session,
+    key_id: int,
+    reactivated_by_user_id: Optional[int] = None
+) -> bool:
     """Reactivate an API key."""
     try:
         api_key = db.get(APIKey, key_id)
         if api_key:
+            # Check if user is active before reactivating key
+            user = db.get(User, api_key.user_id)
+            if not user or user.status != UserStatus.ACTIVE:
+                raise ValueError("Cannot reactivate key for inactive user")
+
             api_key.is_active = True
-            db.flush()  # Ensure change is reflected
+            db.flush()
             
             # Audit logging
             audit_log(
                 action="reactivate_api_key",
-                user_id=str(reactivated_by),
-                details=f"Reactivated API key {api_key.name}"
+                user_id=str(reactivated_by_user_id),
+                details={
+                    "key_id": key_id,
+                    "key_name": api_key.name,
+                    "owner_id": api_key.user_id
+                }
             )
             return True
         return False
@@ -208,7 +253,7 @@ def require_admin(api_key: APIKey = Depends(get_api_key)):
         # Audit logging for unauthorized admin access attempts
         audit_log(
             action="admin_access_denied",
-            user_id=str(api_key.id) if api_key else None,
+            user_id=str(api_key.user_id) if api_key else None,
             details="Unauthorized admin access attempt",
             status="failure"
         )

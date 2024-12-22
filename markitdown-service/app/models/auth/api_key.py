@@ -1,7 +1,10 @@
-from datetime import datetime, UTC  # Add UTC import
-from typing import Optional
-from sqlmodel import SQLModel, Field
+from datetime import datetime, UTC
+from typing import Optional, TYPE_CHECKING
+from sqlmodel import SQLModel, Field, Relationship
 from enum import Enum
+
+if TYPE_CHECKING:
+    from .user import User
 
 class Role(str, Enum):
     ADMIN = "admin"
@@ -14,8 +17,8 @@ class APIKey(SQLModel, table=True):
     key: str = Field(index=True)
     name: str
     role: Role
-    # Update this line to use datetime.now(UTC)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_used: Optional[datetime] = Field(default=None)
     is_active: bool = Field(default=True)
-    created_by: Optional[int] = Field(default=None)
+    user_id: Optional[int] = Field(default=None, foreign_key="users.id")
+    user: Optional["User"] = Relationship(back_populates="api_keys")

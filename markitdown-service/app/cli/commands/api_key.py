@@ -8,7 +8,8 @@ from app.core.config import settings
 from app.models.auth.api_key import Role, APIKey
 from app.core.security.api_key import create_api_key
 from app.db.session import get_db_session
-from app.utils.audit import audit_log  # Add this import
+from app.utils.audit import audit_log
+from app.models.auth.user import User, UserStatus
 import logging
 
 app = typer.Typer(help="Manage API keys")
@@ -19,12 +20,18 @@ logger = logging.getLogger(__name__)
 def create(
     name: str = typer.Option(..., help="Name for the API key"),
     role: Role = typer.Option(Role.USER, help="Role for the API key"),
+    user_id: int = typer.Option(..., help="User ID that owns this key"),
     description: str = typer.Option(None, help="Optional description")
 ):
     """Create a new API key"""
     try:
         with get_db_session() as db:
-            api_key = create_api_key(db, name=name, role=role)
+            api_key = create_api_key(
+                db=db, 
+                name=name, 
+                role=role, 
+                user_id=user_id
+            )
             
             table = Table(title="New API Key Created", show_header=False, title_style="bold green")
             table.add_column("Field", style="cyan")
@@ -32,7 +39,8 @@ def create(
             
             table.add_row("Name", api_key.name)
             table.add_row("Key", api_key.key)
-            table.add_row("Role", api_key.role)
+            table.add_row("Role", api_key.role.value)
+            table.add_row("User ID", str(api_key.user_id))
             table.add_row("Created", str(api_key.created_at))
             
             console.print(Panel(
@@ -52,7 +60,6 @@ def create(
 @app.command()
 def list(
     show_inactive: bool = typer.Option(False, help="Show inactive keys"),
-    role: Role = typer.Option(None, help="Filter by role"),
     format: str = typer.Option("table", help="Output format (table/json)")
 ):
     """List all API keys"""
@@ -62,8 +69,6 @@ def list(
             
             if not show_inactive:
                 query = query.where(APIKey.is_active == True)
-            if role:
-                query = query.where(APIKey.role == role)
                 
             api_keys = db.exec(query).all()
             
@@ -77,10 +82,13 @@ def list(
                     {
                         "id": key.id,
                         "name": key.name,
-                        "role": key.role,
+                        "role": key.role.value,
                         "created_at": key.created_at.isoformat(),
                         "last_used": key.last_used.isoformat() if key.last_used else None,
-                        "is_active": key.is_active
+                        "is_active": key.is_active,
+                        "user_id": key.user_id,
+                        "user_name": db.get(User, key.user_id).name if key.user_id else None,
+                        "user_status": db.get(User, key.user_id).status.value if key.user_id else None
                     }
                     for key in api_keys
                 ]
@@ -95,15 +103,24 @@ def list(
             table.add_column("ID", style="cyan", no_wrap=True)
             table.add_column("Name", style="green")
             table.add_column("Role", style="blue")
+            table.add_column("Owner", style="yellow")
+            table.add_column("Owner Status", style="yellow")
             table.add_column("Created", style="magenta")
-            table.add_column("Last Used", style="yellow")
-            table.add_column("Status", style="red")
+            table.add_column("Last Used", style="magenta")
+            table.add_column("Key Status", style="red")
             
             for key in api_keys:
+                # Get user information
+                user = db.get(User, key.user_id) if key.user_id else None
+                user_display = f"{user.name} (ID: {user.id})" if user else "[red]No owner[/red]"
+                user_status = "🟢 Active" if user and user.status == UserStatus.ACTIVE else "🔴 Inactive" if user else "N/A"
+                
                 table.add_row(
                     str(key.id),
                     key.name,
-                    key.role,
+                    key.role.value,
+                    user_display,
+                    user_status,
                     str(key.created_at.strftime("%Y-%m-%d %H:%M")),
                     str(key.last_used.strftime("%Y-%m-%d %H:%M")) if key.last_used else "Never",
                     "🟢 Active" if key.is_active else "🔴 Inactive"
@@ -116,7 +133,6 @@ def list(
         console.print(f"[red]Error listing API keys: {str(e)}[/red]")
         raise typer.Exit(1)
 
-# app/cli/commands/api_key.py
 @app.command()
 def deactivate(
     key_id: int = typer.Argument(..., help="ID of the API key to deactivate"),
@@ -201,18 +217,31 @@ def info(
                 console.print(f"[red]API key with ID {key_id} not found[/red]")
                 raise typer.Exit(1)
             
+            # Get associated user
+            user = db.get(User, api_key.user_id) if api_key.user_id else None
+            
             table = Table(show_header=False, title=f"API Key Details: {api_key.name}")
             table.add_column("Field", style="cyan")
             table.add_column("Value", style="green")
             
             table.add_row("ID", str(api_key.id))
             table.add_row("Name", api_key.name)
-            table.add_row("Role", api_key.role)
-            table.add_row("Status", "Active" if api_key.is_active else "Inactive")
+            table.add_row("Role", api_key.role.value)
+            table.add_row("Status", "🟢 Active" if api_key.is_active else "🔴 Inactive")
             table.add_row("Created", str(api_key.created_at))
             table.add_row("Last Used", str(api_key.last_used) if api_key.last_used else "Never")
             
-            console.print(table)
+            if user:
+                table.add_section()
+                table.add_row("Owner ID", str(user.id))
+                table.add_row("Owner Name", user.name)
+                table.add_row("Owner Email", user.email)
+                table.add_row("Owner Status", "🟢 Active" if user.status == UserStatus.ACTIVE else "🔴 Inactive")
+            else:
+                table.add_section()
+                table.add_row("Owner", "[red]No associated user[/red]")
+            
+            console.print(Panel(table, border_style="blue"))
             
     except Exception as e:
         logger.exception(f"Failed to show API key info for {key_id}")

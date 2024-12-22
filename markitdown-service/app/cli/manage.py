@@ -1,6 +1,6 @@
 # app/cli/manage.py
 import typer
-from app.cli.commands import api_key
+from app.cli.commands import api_key, user
 from app.db.init_db import init_db
 from app.db.session import get_db_session
 from rich.console import Console
@@ -16,12 +16,16 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from app.core.config import settings
 from app.core.logging import get_cli_logging_config
+from app.models.auth.user import User, UserStatus
+from app.models.auth.api_key import APIKey
+from sqlmodel import select
 
 app = typer.Typer(
     help="MarkItDown API Management CLI",
     no_args_is_help=True
 )
 app.add_typer(api_key.app, name="apikeys", help="Manage API keys")
+app.add_typer(user.app, name="users", help="Manage users")
 console = Console()
 
 # Initialize module-specific loggers
@@ -62,6 +66,21 @@ def display_version_info():
     table.add_row("Database URL", settings.DATABASE_URL)
     table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
     table.add_row("Max File Size", f"{settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
+    
+    # Add user management info
+    with get_db_session() as db:
+        users = db.exec(select(User)).all()  # Get all users first
+        user_count = len(users)  # Then count them
+        active_users = sum(1 for user in users if user.status == UserStatus.ACTIVE)  # Count active users
+        
+        table.add_row("Total Users", str(user_count))
+        table.add_row("Active Users", str(active_users))
+        
+        # Add API key counts
+        api_keys = db.exec(select(APIKey)).all()
+        active_keys = sum(1 for key in api_keys if key.is_active)
+        table.add_row("Total API Keys", str(len(api_keys)))
+        table.add_row("Active API Keys", str(active_keys))
     
     console.print(Panel(
         table,
@@ -142,7 +161,8 @@ def init(
         
         console.print(Panel(
             "[green]Database initialized successfully![/green]\n"
-            "Use 'python manage.py apikeys create' to create new API keys.",
+            "Use 'python manage.py users create' to create users\n"
+            "Use 'python manage.py apikeys create' to create API keys",
             title="Initialization Complete",
             border_style="green"
         ))
@@ -168,7 +188,9 @@ def shell(
         
         # Import commonly needed objects
         from app.models.auth.api_key import APIKey, Role
+        from app.models.auth.user import User, UserStatus
         from app.core.security.api_key import create_api_key
+        from app.core.security.user import create_user
         from sqlmodel import select
         
         # Create context dictionary with a new database session
@@ -177,7 +199,10 @@ def shell(
                 'settings': settings,
                 'APIKey': APIKey,
                 'Role': Role,
+                'User': User,
+                'UserStatus': UserStatus,
                 'create_api_key': create_api_key,
+                'create_user': create_user,
                 'select': select,
                 'db': db,
                 'console': console,
@@ -192,8 +217,11 @@ def shell(
 
 Available objects:
 • settings: Application settings
+• User: User model
+• UserStatus: User status enum
 • APIKey: API key model
 • Role: API key roles
+• create_user: Function to create new users
 • create_api_key: Function to create new API keys
 • select: SQLModel select function
 • db: Database session
@@ -203,8 +231,8 @@ Available objects:
 
 Example usage:
 >>> with get_db_session() as db:
-...     keys = db.exec(select(APIKey)).all()
-...     console.print(keys)
+...     users = db.exec(select(User)).all()
+...     console.print(users)
 """
             
             cli_logger.debug("Launching IPython shell")
