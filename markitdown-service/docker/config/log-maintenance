@@ -1,3 +1,28 @@
 #!/bin/sh
-/usr/sbin/logrotate /etc/logrotate.d/markitdown
-/usr/local/bin/python /app/manage.py logs cleanup
+# Activate virtual environment
+. /opt/venv/bin/activate
+
+# Run logrotate with our custom config
+/usr/sbin/logrotate -s /var/lib/logrotate/logrotate.status /etc/logrotate.d/markitdown
+ROTATE_STATUS=$?
+
+# Log the rotation status
+if [ $ROTATE_STATUS -eq 0 ]; then
+    echo "$(date): Logrotate completed successfully"
+else
+    echo "$(date): Logrotate failed with status $ROTATE_STATUS"
+    exit $ROTATE_STATUS
+fi
+
+# Run cleanup if rotation succeeded
+echo "$(date): Starting log cleanup"
+python /app/manage.py logs cleanup
+CLEANUP_STATUS=$?
+
+if [ $CLEANUP_STATUS -eq 0 ]; then
+    echo "$(date): Log cleanup completed successfully"
+    exit 0
+else
+    echo "$(date): Log cleanup failed with status $CLEANUP_STATUS"
+    exit $CLEANUP_STATUS
+fi

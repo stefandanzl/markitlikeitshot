@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 import os
+from pathlib import Path
 from app.api.v1.endpoints import conversion
 from app.core.security.api_key import get_api_key
 from app.db.init_db import ensure_db_initialized
@@ -18,9 +19,16 @@ from app.core.config.settings import settings
 from app.core.rate_limiting.limiter import limiter
 from app.core.logging.config import get_web_logging_config
 from app.core.audit import audit_log, AuditAction
+from app.core.logging.management import LogManager
 
 # Initialize logging
-os.makedirs(settings.LOG_DIR, exist_ok=True)
+log_dir = Path(settings.LOG_DIR)
+log_dir.mkdir(parents=True, exist_ok=True)
+
+# Initialize log manager
+log_manager = LogManager()
+
+# Configure logging
 logging.config.dictConfig(get_web_logging_config())
 
 # Create module-specific loggers
@@ -39,20 +47,34 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("Starting application initialization...")
         
+        # Ensure log directory is properly set up
+        log_dir = Path(settings.LOG_DIR)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        
         # Log detailed configuration in debug mode
         logger.debug("Application configuration:")
         logger.debug(f"Environment: {settings.ENVIRONMENT}")
         logger.debug(f"Log Level: {settings.LOG_LEVEL}")
         logger.debug(f"API Key Auth: {settings.API_KEY_AUTH_ENABLED}")
         logger.debug(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
+        logger.debug(f"Log Directory: {settings.LOG_DIR}")
         
         # Initialize database
         logger.info("Initializing database...")
         ensure_db_initialized()
         
+        # Check log rotation configuration
+        if settings.ENVIRONMENT in ["production", "development"]:
+            try:
+                logrotate_config = Path("/etc/logrotate.d/markitdown")
+                if not logrotate_config.exists():
+                    logger.warning("Logrotate configuration not found")
+            except Exception as e:
+                logger.warning(f"Failed to check logrotate configuration: {e}")
+        
         # Log startup status
         logger.info(f"Application started successfully in {settings.ENVIRONMENT} mode")
-        
+
         # Audit log startup with detailed environment info
         audit_log(
             action=AuditAction.SERVICE_STARTUP,
@@ -61,7 +83,9 @@ async def lifespan(app: FastAPI):
                 "environment": settings.ENVIRONMENT,
                 "log_level": settings.LOG_LEVEL,
                 "api_auth_enabled": settings.API_KEY_AUTH_ENABLED,
-                "version": settings.VERSION
+                "version": settings.VERSION,
+                "log_dir": str(log_dir),
+                "log_rotation": settings.LOG_ROTATION
             }
         )
         
@@ -80,7 +104,10 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Initiating application shutdown...")
     try:
-        # Perform cleanup tasks here if needed
+        # Ensure all logs are flushed
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        
         audit_log(
             action=AuditAction.SERVICE_SHUTDOWN,
             user_id=None,
@@ -187,6 +214,21 @@ async def health_check():
             db.execute(text("SELECT 1"))
             db_logger.debug("Database health check successful")
         
+        # Check log directory status
+        log_status = "healthy"
+        log_error = None
+        try:
+            log_dir = Path(settings.LOG_DIR)
+            if not log_dir.exists():
+                log_status = "warning"
+                log_error = "Log directory does not exist"
+            elif not os.access(log_dir, os.W_OK):
+                log_status = "warning"
+                log_error = "Log directory not writable"
+        except Exception as e:
+            log_status = "error"
+            log_error = str(e)
+        
         health_status = {
             "status": "healthy",
             "version": settings.VERSION,
@@ -197,6 +239,11 @@ async def health_check():
             "rate_limit": {
                 "requests": settings.RATE_LIMIT_REQUESTS,
                 "period": settings.RATE_LIMIT_PERIOD
+            },
+            "logging": {
+                "status": log_status,
+                "directory": str(log_dir),
+                "error": log_error
             }
         }
         
@@ -208,6 +255,14 @@ async def health_check():
             user_id=None,
             details=health_status
         )
+        
+        # If there are any warnings, reflect in response code
+        if log_status == "warning":
+            return JSONResponse(
+                status_code=200,
+                content=health_status,
+                headers={"X-Health-Warning": "Log system issues detected"}
+            )
         
         return health_status
     except Exception as e:
@@ -238,12 +293,19 @@ async def health_check():
 if __name__ == "__main__":
     import uvicorn
     
+    # Ensure log directory exists before starting server
+    log_dir = Path(settings.LOG_DIR)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Configure logging
+    log_config = get_web_logging_config()
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         reload=settings.ENVIRONMENT == "development",
         log_level=settings.LOG_LEVEL.lower(),
-        log_config=get_web_logging_config(),
+        log_config=log_config,
         workers=1
     )

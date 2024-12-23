@@ -14,7 +14,16 @@ class SafeRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
     def __init__(self, filename: str, **kwargs):
         super().__init__(filename, **kwargs)
         self.rotator = self._rotator
+        self.namer = self._namer
         
+    def _namer(self, default_name: str) -> str:
+        """Generate the name of the rotated file."""
+        # Extract the base name without the path
+        base_name = Path(default_name).stem
+        # Add date suffix in our standard format
+        date_suffix = datetime.now().strftime('%Y-%m-%d')
+        return f"{base_name}_{date_suffix}.log"
+    
     def _rotator(self, source: str, dest: str) -> None:
         """Custom rotator that adds file locking and compression."""
         with open(source, 'a') as f:
@@ -22,10 +31,17 @@ class SafeRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
                 # Acquire exclusive lock
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                 
-                # Perform rotation
-                if Path(dest).exists():
-                    Path(dest).unlink()
-                Path(source).rename(dest)
+                # Copy content and truncate source
+                with open(source, 'rb') as sf:
+                    content = sf.read()
+                    
+                # Write to new file
+                with open(dest, 'wb') as df:
+                    df.write(content)
+                
+                # Truncate source file
+                with open(source, 'w') as sf:
+                    pass
                 
                 # Compress the rotated file
                 with open(dest, 'rb') as f_in:

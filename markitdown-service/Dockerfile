@@ -26,8 +26,8 @@ RUN apt-get update && apt-get install -y \
 RUN groupadd -g ${GID} appuser && \
     useradd -u ${UID} -g appuser -s /bin/bash -m appuser
 
-# Configure sudo access for logrotate and directory management
-RUN echo "appuser ALL=(root) NOPASSWD: /usr/sbin/logrotate, /bin/chown, /bin/chmod" > /etc/sudoers.d/appuser && \
+# Configure sudo access for logrotate, directory management, and cron
+RUN echo "appuser ALL=(root) NOPASSWD: /usr/sbin/logrotate, /bin/chown, /bin/chmod, /usr/sbin/cron, /usr/sbin/service cron *" > /etc/sudoers.d/appuser && \
     chmod 0440 /etc/sudoers.d/appuser
 
 # Create necessary directories
@@ -72,9 +72,19 @@ RUN chmod 755 /app/start.sh && \
 # Give appuser access to the virtual environment
 RUN chown -R appuser:appuser $VIRTUAL_ENV
 
-# Configure cron for root
-RUN echo "0 0 * * * /usr/sbin/logrotate /etc/logrotate.d/markitdown" > /etc/cron.d/logrotate && \
-    chmod 0644 /etc/cron.d/logrotate
+# Configure cron for root with proper environment
+RUN echo 'SHELL=/bin/sh\n\
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\
+\n\
+0 0 * * * root /usr/sbin/logrotate /etc/logrotate.d/markitdown\n\
+' > /etc/cron.d/logrotate && \
+    chmod 0644 /etc/cron.d/logrotate && \
+    chown root:root /etc/cron.d/logrotate
+
+# Set up cron log directory
+RUN mkdir -p /var/log/cron && \
+    chmod 755 /var/log/cron && \
+    chown root:root /var/log/cron
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

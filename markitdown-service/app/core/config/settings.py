@@ -75,7 +75,7 @@ class Settings(BaseSettings):
 
     # API Key Authentication Settings
     API_KEY_AUTH_ENABLED: bool = True
-    API_KEY_HEADER_NAME: str = "X-API-Key"  # This was missing
+    API_KEY_HEADER_NAME: str = "X-API-Key"
     API_KEY_LENGTH: int = 32
     ADMIN_API_KEY: Optional[str] = os.getenv("ADMIN_API_KEY")
     API_KEY_EXPIRATION_DAYS: Optional[int] = None
@@ -100,6 +100,26 @@ class Settings(BaseSettings):
     LOG_ROTATION: str = "midnight"
     LOG_BACKUP_COUNT: int = 7
     LOG_ENCODING: str = "utf-8"
+
+    # Log Retention Settings
+    LOG_RETENTION_DAYS: Dict[str, int] = {
+        "audit": 90,  # Using existing AUDIT_LOG_RETENTION_DAYS
+        "app": 30,    # Application logs
+        "cli": 15,    # CLI operation logs
+        "sql": 7      # Database query logs
+    }
+    
+    # Log Rotation Settings
+    LOG_ROTATION_MAX_SIZE: str = "100M"  # Rotate when file exceeds this size
+    LOG_COMPRESSION_ENABLED: bool = True
+    LOG_COMPRESSION_METHOD: str = "gzip"
+    
+    # Environment-specific retention multipliers
+    LOG_RETENTION_MULTIPLIERS: Dict[str, float] = {
+        "development": 0.5,  # Keep logs for half the time in development
+        "test": 0.25,        # Keep logs for quarter the time in test
+        "production": 1.0    # Keep logs for full duration in production
+    }
 
     # Component-specific logging levels
     COMPONENT_LOG_LEVELS: Dict[str, str] = {
@@ -154,6 +174,12 @@ class Settings(BaseSettings):
                 self.get_log_level
             )
         return self.get_log_level
+
+    def get_retention_days(self, log_type: str) -> int:
+        """Get environment-adjusted retention period for log type"""
+        base_days = self.LOG_RETENTION_DAYS.get(log_type, 30)
+        multiplier = self.LOG_RETENTION_MULTIPLIERS.get(self.ENVIRONMENT, 1.0)
+        return int(base_days * multiplier)
 
 @lru_cache()
 def get_settings() -> Settings:
