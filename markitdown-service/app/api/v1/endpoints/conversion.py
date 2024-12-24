@@ -213,7 +213,50 @@ def get_rate_limit_headers(request: Request) -> dict:
         "Retry-After": str(window_seconds)
     }
 
-@router.post("/convert/text", response_class=RateLimitedResponse)
+@router.post(
+    "/convert/text",
+    response_class=RateLimitedResponse,
+    responses={
+        200: {
+            "description": "Successfully converted text to markdown",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Remaining": {
+                    "description": "The number of requests remaining in the current time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        }
+    }
+)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_text",
@@ -244,7 +287,50 @@ async def convert_text(
         headers = get_rate_limit_headers(request)
         return RateLimitedResponse(content=markdown_content, headers=headers)
 
-@router.post("/convert/file", response_class=RateLimitedResponse)
+@router.post(
+    "/convert/file",
+    response_class=RateLimitedResponse,
+    responses={
+        200: {
+            "description": "Successfully converted file to markdown",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Remaining": {
+                    "description": "The number of requests remaining in the current time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        }
+    }
+)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_file",
@@ -286,7 +372,50 @@ async def convert_file(
             status_code=status.HTTP_200_OK
         )
 
-@router.post("/convert/url", response_class=RateLimitedResponse)
+@router.post(
+    "/convert/url",
+    response_class=RateLimitedResponse,
+    responses={
+        200: {
+            "description": "Successfully converted URL content to markdown",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Remaining": {
+                    "description": "The number of requests remaining in the current time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "headers": {
+                "X-RateLimit-Limit": {
+                    "description": "The maximum number of requests allowed per time window",
+                    "schema": {"type": "integer"}
+                },
+                "X-RateLimit-Reset": {
+                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
+                    "schema": {"type": "integer"}
+                },
+                "Retry-After": {
+                    "description": "The number of seconds to wait before making another request",
+                    "schema": {"type": "integer"}
+                }
+            }
+        }
+    }
+)
 @limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_url",
