@@ -2,6 +2,9 @@
 # Activate virtual environment
 . /opt/venv/bin/activate
 
+# Ensure log directory exists
+mkdir -p /var/log/markitdown
+
 # Run logrotate with our custom config
 /usr/sbin/logrotate -s /var/lib/logrotate/logrotate.status /etc/logrotate.d/markitdown
 ROTATE_STATUS=$?

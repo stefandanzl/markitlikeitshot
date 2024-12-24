@@ -1,17 +1,30 @@
 from typing import Dict, Any
 from pathlib import Path
+import logging
 import logging.handlers
 import fcntl
 import gzip
 import shutil
+import os
 from datetime import datetime
 from app.core.config.settings import settings
 from app.core.logging.formatters import AuditFormatter
+
+logger = logging.getLogger(__name__)
 
 class SafeRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
     """Thread and process-safe rotating file handler with compression."""
     
     def __init__(self, filename: str, **kwargs):
+        # Ensure log directory exists with proper permissions
+        log_dir = os.path.dirname(filename)
+        os.makedirs(log_dir, exist_ok=True)
+        
+        # Create log file if it doesn't exist
+        if not os.path.exists(filename):
+            Path(filename).touch()
+            os.chmod(filename, 0o644)
+        
         super().__init__(filename, **kwargs)
         self.rotator = self._rotator
         self.namer = self._namer
@@ -21,39 +34,57 @@ class SafeRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
         # Extract the base name without the path
         base_name = Path(default_name).stem
         # Add date suffix in our standard format
-        date_suffix = datetime.now().strftime('%Y-%m-%d')
-        return f"{base_name}_{date_suffix}.log"
+        date_suffix = datetime.now().strftime('%Y%m%d')
+        return f"{base_name}-{date_suffix}.log"
     
     def _rotator(self, source: str, dest: str) -> None:
         """Custom rotator that adds file locking and compression."""
-        with open(source, 'a') as f:
-            try:
-                # Acquire exclusive lock
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                
-                # Copy content and truncate source
-                with open(source, 'rb') as sf:
-                    content = sf.read()
+        try:
+            # Ensure directory exists with proper permissions
+            dest_dir = os.path.dirname(dest)
+            os.makedirs(dest_dir, exist_ok=True)
+            
+            with open(source, 'a') as f:
+                try:
+                    # Acquire exclusive lock
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                     
-                # Write to new file
-                with open(dest, 'wb') as df:
-                    df.write(content)
-                
-                # Truncate source file
-                with open(source, 'w') as sf:
-                    pass
-                
-                # Compress the rotated file
-                with open(dest, 'rb') as f_in:
-                    gz_path = f"{dest}.gz"
-                    with gzip.open(gz_path, 'wb') as f_out:
-                        shutil.copyfileobj(f_in, f_out)
-                
-                # Remove the uncompressed rotated file
-                Path(dest).unlink()
-                
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    # Copy content and truncate source
+                    with open(source, 'rb') as sf:
+                        content = sf.read()
+                    
+                    # Write to new file with proper permissions
+                    with open(dest, 'wb') as df:
+                        os.chmod(dest, 0o644)  # Set permissions before writing
+                        df.write(content)
+                    
+                    # Truncate source file
+                    with open(source, 'w') as sf:
+                        pass
+                    
+                    # Compress the rotated file
+                    with open(dest, 'rb') as f_in:
+                        gz_path = f"{dest}.gz"
+                        with gzip.open(gz_path, 'wb') as f_out:
+                            shutil.copyfileobj(f_in, f_out)
+                        os.chmod(gz_path, 0o644)  # Set permissions for compressed file
+                    
+                    # Remove the uncompressed rotated file
+                    Path(dest).unlink()
+                    
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except (IOError, OSError) as e:
+            logger.error(f"Error rotating log file {source} to {dest}: {str(e)}")
+            # Ensure we don't leave partial files
+            try:
+                if os.path.exists(dest):
+                    os.unlink(dest)
+                gz_path = f"{dest}.gz"
+                if os.path.exists(gz_path):
+                    os.unlink(gz_path)
+            except OSError as cleanup_error:
+                logger.error(f"Error cleaning up after failed rotation: {str(cleanup_error)}")
 
 def get_file_handler(filename: str, formatter: str = "detailed") -> Dict[str, Any]:
     """Get a safe rotating file handler configuration."""

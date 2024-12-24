@@ -30,13 +30,24 @@ RUN groupadd -g ${GID} appuser && \
 RUN echo "appuser ALL=(root) NOPASSWD: /usr/sbin/logrotate, /bin/chown, /bin/chmod, /usr/sbin/cron, /usr/sbin/service cron *" > /etc/sudoers.d/appuser && \
     chmod 0440 /etc/sudoers.d/appuser
 
-# Create necessary directories
+# Create necessary directories and set up log files
 RUN mkdir -p /app/data /app/logs /var/lib/logrotate && \
-    touch /var/lib/logrotate/status
+    touch /var/lib/logrotate/status && \
+    touch /app/logs/app_development.log && \
+    touch /app/logs/sql_development.log && \
+    touch /app/logs/audit_development.log && \
+    touch /app/logs/app_production.log && \
+    touch /app/logs/sql_production.log && \
+    touch /app/logs/audit_production.log && \
+    touch /app/logs/cli_development.log && \
+    touch /app/logs/cli_production.log
 
-# Set up logrotate permissions
+# Set up permissions for logs and logrotate
 RUN chmod 644 /var/lib/logrotate/status && \
-    chown root:root /var/lib/logrotate/status
+    chown root:root /var/lib/logrotate/status && \
+    chown -R appuser:appuser /app/logs && \
+    chmod -R 755 /app/logs && \
+    chmod 644 /app/logs/*.log
 
 # Create and activate virtual environment
 ENV VIRTUAL_ENV=/opt/venv
@@ -65,8 +76,7 @@ RUN chmod 755 /app/start.sh && \
     chmod 644 /etc/logrotate.d/markitdown && \
     chown root:root /etc/logrotate.d/markitdown && \
     chown root:root /etc/cron.daily/log-maintenance && \
-    chown -R appuser:appuser /app/logs /app/data && \
-    chmod 755 /app/logs && \
+    chown -R appuser:appuser /app/data && \
     chmod 755 /app/data
 
 # Give appuser access to the virtual environment
@@ -85,6 +95,11 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin\n\
 RUN mkdir -p /var/log/cron && \
     chmod 755 /var/log/cron && \
     chown root:root /var/log/cron
+
+# Create log directories with proper permissions
+RUN mkdir -p /var/log/markitdown && \
+    chown -R appuser:appuser /var/log/markitdown && \
+    chmod -R 755 /var/log/markitdown
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

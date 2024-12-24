@@ -47,6 +47,8 @@ services:
       - type: volume
         source: markitdown_prod_logs
         target: /app/logs
+        volume:
+          nocopy: false
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=sqlite:///./data/api_keys.db
