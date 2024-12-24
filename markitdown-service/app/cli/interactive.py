@@ -7,6 +7,7 @@ from rich.panel import Panel
 from enum import Enum
 from app.cli.commands import api_key as api_key_commands
 from app.cli.commands import user as user_commands
+from app.cli.commands import logs as log_commands
 from app.models.auth.api_key import Role
 from app.models.auth.user import User, UserStatus
 from app.db.session import get_db_session
@@ -28,9 +29,16 @@ class MenuChoice(str, Enum):
     DEACTIVATE_KEY = "Deactivate API Key"
     REACTIVATE_KEY = "Reactivate API Key"
     VIEW_KEY = "View Key Details"
-    ROTATE_LOGS = "Rotate Logs"  # Add this line
+    LOGS_MENU = "Log Management"  # Changed from ROTATE_LOGS to LOGS_MENU
     VERSION = "Show Version Info"
     EXIT = "Exit"
+
+class LogMenuChoice(str, Enum):
+    VIEW_STATUS = "View Log Status"
+    LIST_FILES = "List Log Files"
+    ROTATE_LOGS = "Rotate Logs"
+    CLEANUP_LOGS = "Clean Up Old Logs"
+    BACK = "Back to Main Menu"
 
 def display_menu() -> MenuChoice:
     """Display main menu and return user choice."""
@@ -68,6 +76,45 @@ def display_menu() -> MenuChoice:
         # Direct menu choice value
         elif choice in MenuChoice._value2member_map_:
             return MenuChoice(choice)
+        
+        console.print("[red]Invalid choice. Please try again.[/red]")
+
+def display_log_menu() -> LogMenuChoice:
+    """Display log management menu and return user choice."""
+    console.print("\n[bold blue]Log Management[/bold blue]")
+    
+    table = Table(
+        show_header=False,
+        border_style="blue",
+        box=None,
+        padding=(0, 2)
+    )
+    table.add_column("Option", style="cyan")
+    
+    # Create a mapping of numbers to choices
+    choice_map = {str(i): choice for i, choice in enumerate(LogMenuChoice, 1)}
+    
+    for num, choice in choice_map.items():
+        table.add_row(f"{num}. {choice.value}")
+    
+    console.print(Panel(table, border_style="blue"))
+    
+    # Allow both number and full text input
+    valid_inputs = list(choice_map.keys()) + [choice.value for choice in LogMenuChoice]
+    
+    while True:
+        choice = Prompt.ask(
+            "\n[cyan]Select an option[/cyan]",
+            show_choices=True,
+            choices=valid_inputs
+        )
+        
+        # Convert number input to menu choice
+        if choice.isdigit() and choice in choice_map:
+            return choice_map[choice]
+        # Direct menu choice value
+        elif choice in LogMenuChoice._value2member_map_:
+            return LogMenuChoice(choice)
         
         console.print("[red]Invalid choice. Please try again.[/red]")
 
@@ -147,6 +194,35 @@ def manage_user_status_menu():
     except Exception as e:
         logger.exception("Failed to manage user status")
         console.print(f"[red]Error managing user status: {str(e)}[/red]")
+
+def log_management_menu():
+    """Interactive menu for log management."""
+    try:
+        while True:
+            choice = display_log_menu()
+            
+            if choice == LogMenuChoice.BACK:
+                break
+            
+            typer.echo()
+            
+            if choice == LogMenuChoice.VIEW_STATUS:
+                log_commands.status()
+            elif choice == LogMenuChoice.LIST_FILES:
+                log_commands.list()
+            elif choice == LogMenuChoice.ROTATE_LOGS:
+                if Confirm.ask("[cyan]Rotate all log files now?[/cyan]"):
+                    log_commands.rotate()
+            elif choice == LogMenuChoice.CLEANUP_LOGS:
+                if Confirm.ask("[yellow]Clean up old log files?[/yellow]"):
+                    log_commands.cleanup()
+            
+            if choice != LogMenuChoice.BACK:
+                Prompt.ask("\n[cyan]Press Enter to continue[/cyan]")
+                
+    except Exception as e:
+        logger.exception("Log management error")
+        console.print(f"[red]Error in log management: {str(e)}[/red]")
 
 def create_key_menu():
     """Interactive menu for creating a new API key."""
@@ -273,17 +349,6 @@ def view_key_menu():
         logger.exception("Failed to view API key")
         console.print(f"[red]Error viewing API key: {str(e)}[/red]")
 
-def rotate_logs_menu():
-    """Interactive menu for log rotation."""
-    try:
-        if Confirm.ask("[cyan]Rotate all log files now?[/cyan]"):
-            from app.cli.commands.logs import rotate
-            typer.echo()
-            rotate()
-    except Exception as e:
-        logger.exception("Failed to rotate logs")
-        console.print(f"[red]Error rotating logs: {str(e)}[/red]")
-
 def interactive_menu():
     """Main interactive menu loop."""
     try:
@@ -314,8 +379,8 @@ def interactive_menu():
                 reactivate_key_menu()
             elif choice == MenuChoice.VIEW_KEY:
                 view_key_menu()
-            elif choice == MenuChoice.ROTATE_LOGS:
-                rotate_logs_menu()
+            elif choice == MenuChoice.LOGS_MENU:
+                log_management_menu()
             elif choice == MenuChoice.VERSION:
                 display_version_info()
             

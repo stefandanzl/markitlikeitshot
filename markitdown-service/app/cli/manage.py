@@ -1,6 +1,6 @@
 # app/cli/manage.py
 import typer
-from app.cli.commands import api_key, user
+from app.cli.commands import api_key, user, logs
 from app.db.init_db import init_db
 from app.db.session import get_db_session
 from rich.console import Console
@@ -26,6 +26,8 @@ app = typer.Typer(
 )
 app.add_typer(api_key.app, name="apikeys", help="Manage API keys")
 app.add_typer(user.app, name="users", help="Manage users")
+app.add_typer(logs.app, name="logs", help="Manage log files")
+
 console = Console()
 
 # Initialize module-specific loggers
@@ -69,9 +71,9 @@ def display_version_info():
     
     # Add user management info
     with get_db_session() as db:
-        users = db.exec(select(User)).all()  # Get all users first
-        user_count = len(users)  # Then count them
-        active_users = sum(1 for user in users if user.status == UserStatus.ACTIVE)  # Count active users
+        users = db.exec(select(User)).all()
+        user_count = len(users)
+        active_users = sum(1 for user in users if user.status == UserStatus.ACTIVE)
         
         table.add_row("Total Users", str(user_count))
         table.add_row("Active Users", str(active_users))
@@ -81,6 +83,9 @@ def display_version_info():
         active_keys = sum(1 for key in api_keys if key.is_active)
         table.add_row("Total API Keys", str(len(api_keys)))
         table.add_row("Active API Keys", str(active_keys))
+    
+    # Add log retention information
+    table.add_row("Log Retention", f"{settings.AUDIT_LOG_RETENTION_DAYS} days")
     
     console.print(Panel(
         table,
@@ -162,7 +167,8 @@ def init(
         console.print(Panel(
             "[green]Database initialized successfully![/green]\n"
             "Use 'python manage.py users create' to create users\n"
-            "Use 'python manage.py apikeys create' to create API keys",
+            "Use 'python manage.py apikeys create' to create API keys\n"
+            "Use 'python manage.py logs status' to check log settings",
             title="Initialization Complete",
             border_style="green"
         ))
@@ -191,6 +197,7 @@ def shell(
         from app.models.auth.user import User, UserStatus
         from app.core.security.api_key import create_api_key
         from app.core.security.user import create_user
+        from app.core.logging.management import LogManager
         from sqlmodel import select
         
         # Create context dictionary with a new database session
@@ -207,7 +214,8 @@ def shell(
                 'db': db,
                 'console': console,
                 'get_db_session': get_db_session,
-                'logger': cli_logger
+                'logger': cli_logger,
+                'LogManager': LogManager  # Added LogManager to context
             }
             
             banner = "" if quiet else f"""
@@ -228,11 +236,15 @@ Available objects:
 • console: Rich console for formatted output
 • get_db_session: Database session context manager
 • logger: CLI logger instance
+• LogManager: Log management utility
 
 Example usage:
 >>> with get_db_session() as db:
 ...     users = db.exec(select(User)).all()
 ...     console.print(users)
+
+>>> log_manager = LogManager()
+>>> log_manager.rotate_log('app_development')
 """
             
             cli_logger.debug("Launching IPython shell")
@@ -320,6 +332,17 @@ def check(
                 error_msg = f"Directory check failed for {dir_name}: {str(e)}"
                 cli_logger.error(error_msg)
                 checks.append((f"Directory: {dir_name}", False, str(e)))
+        
+        # Check log rotation configuration
+        try:
+            from app.core.logging.management import LogManager
+            manager = LogManager()
+            manager.get_log_path('test')
+            checks.append(("Log Management", True, "Configured"))
+        except Exception as e:
+            error_msg = f"Log management check failed: {str(e)}"
+            cli_logger.error(error_msg)
+            checks.append(("Log Management", False, str(e)))
     
     # Display results
     table = Table(title="System Check Results")
@@ -361,53 +384,6 @@ def check(
         else:
             cli_logger.info("Suggesting --fix option for failed checks")
             console.print("[yellow]Run with --fix to attempt automatic fixes.[/yellow]")
-        raise typer.Exit(1)
-
-@app.command()
-def clean(
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Force cleanup without confirmation"
-    )
-):
-    """Clean temporary files and logs."""
-    try:
-        if not force and not Confirm.ask(
-            "This will delete temporary files and old logs. Continue?"
-        ):
-            raise typer.Abort()
-        
-        cli_logger.info("Starting cleanup process")
-        with console.status("[bold blue]Cleaning up...") as status:
-            # Clean old logs
-            log_dir = Path("logs")
-            if log_dir.exists():
-                retention = timedelta(days=settings.AUDIT_LOG_RETENTION_DAYS)
-                cutoff = datetime.now() - retention
-                
-                cleaned = 0
-                for log_file in log_dir.glob("*.log"):
-                    try:
-                        mtime = datetime.fromtimestamp(log_file.stat().st_mtime)
-                        if mtime < cutoff:
-                            cli_logger.debug(f"Removing old log file: {log_file}")
-                            log_file.unlink()
-                            cleaned += 1
-                    except Exception as e:
-                        error_msg = f"Failed to process {log_file}: {e}"
-                        cli_logger.warning(error_msg)
-                
-                status.update(f"[bold blue]Cleaned {cleaned} old log files")
-                cli_logger.info(f"Cleaned {cleaned} old log files")
-        
-        console.print("[green]Cleanup completed successfully![/green]")
-    
-    except Exception as e:
-        error_msg = f"Cleanup failed: {str(e)}"
-        console.print(f"[red]{error_msg}[/red]")
-        cli_logger.error(error_msg, exc_info=True)
         raise typer.Exit(1)
 
 @app.command()

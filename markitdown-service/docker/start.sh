@@ -3,25 +3,24 @@ set -e
 
 echo "Starting services..."
 
-# Ensure log directory exists
+# After creating log directory
 mkdir -p /app/logs
+sudo chown -R appuser:appuser /app/logs
+sudo chmod -R 755 /app/logs
+touch /app/logs/app_development.log /app/logs/sql_development.log /app/logs/audit_development.log
+sudo chown appuser:appuser /app/logs/*.log
+sudo chmod 644 /app/logs/*.log
 
-# Set permissions based on environment
-if [ "$ENVIRONMENT" = "development" ] || [ "$ENVIRONMENT" = "test" ]; then
-    # Development/Test: Allow host machine access
-    sudo chown -R $(id -u):$(id -g) /app/logs
-    sudo chmod 775 /app/logs
-else
-    # Production: Restrictive permissions
-    sudo chown -R appuser:appuser /app/logs
-    sudo chmod 755 /app/logs
-fi
+# Start cron service
+echo "Starting cron service..."
+sudo /usr/sbin/service cron start
 
-# Initialize logrotate state if it doesn't exist
-if [ ! -f /var/lib/logrotate/status ]; then
-    sudo touch /var/lib/logrotate/status
-    sudo chmod 644 /var/lib/logrotate/status
+# Verify cron is running using service command
+if ! sudo /usr/sbin/service cron status >/dev/null 2>&1; then
+    echo "ERROR: Cron service failed to start"
+    exit 1
 fi
+echo "Cron service started successfully"
 
 # Start the application
 echo "Starting uvicorn..."
