@@ -206,9 +206,25 @@ def get_rate_limit_headers(request: Request) -> dict:
     window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
     window_reset = now + window_seconds
     
+    # Get rate limit info from state
+    rate_limit_info = getattr(request.state, "_rate_limit_info", None)
+    view_rate_limit = getattr(request.state, "view_rate_limit", None)
+    remaining = settings.RATE_LIMIT_REQUESTS - 1  # Default to max - 1 for current request
+    
+    # First try slowapi's view_rate_limit
+    if view_rate_limit and isinstance(view_rate_limit, dict):
+        remaining = view_rate_limit.get("remaining", remaining)
+        if "reset" in view_rate_limit:
+            window_reset = view_rate_limit["reset"]
+    # Fall back to our _rate_limit_info
+    elif rate_limit_info and isinstance(rate_limit_info, dict):
+        remaining = rate_limit_info.get("remaining", remaining)
+        if "reset" in rate_limit_info:
+            window_reset = rate_limit_info["reset"]
+    
     return {
         "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-        "X-RateLimit-Remaining": str(getattr(request.state, "view_rate_limit_remaining", 0)),
+        "X-RateLimit-Remaining": str(remaining),
         "X-RateLimit-Reset": str(window_reset),
         "Retry-After": str(window_seconds)
     }

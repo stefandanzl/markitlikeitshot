@@ -54,7 +54,7 @@ def validate_file_extension(filename: str, allowed_extensions: Optional[set] = N
     ext_lower = ext.lower()
     
     if not ext_lower:
-        logger.warning("No file extension found", extra={"filename": filename})
+        logger.warning("No file extension found", extra={"input_filename": filename})
         raise FileProcessingError("No file extension provided")
     
     if ext_lower not in allowed_extensions:
@@ -120,9 +120,13 @@ def validate_file_content(
         FileProcessingError: If content is empty or invalid
     """
     if not content:
+        # Rename 'filename' to 'input_filename' in metadata for logging
+        log_metadata = metadata.copy()
+        if 'filename' in log_metadata:
+            log_metadata['input_filename'] = log_metadata.pop('filename')
         logger.warning(
             "Empty file content",
-            extra=metadata
+            extra=log_metadata
         )
         raise FileProcessingError("Empty file provided")
 
