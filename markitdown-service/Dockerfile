@@ -1,4 +1,4 @@
-FROM python:3.13.1-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ ARG UID=1000
 ARG GID=1000
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ffmpeg \
     libsm6 \
@@ -59,11 +59,19 @@ COPY requirements.txt .
 
 # Update pip and install requirements in the virtual environment
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    find /opt/venv -name '*.pyc' -delete && \
+    find /opt/venv -name '__pycache__' -delete
 
 # Copy the application
 COPY ./app /app/app
 COPY manage.py /app/manage.py
+COPY .coveragerc /app/.coveragerc
+
+# Set coverage file permissions
+RUN chown appuser:appuser /app/.coveragerc && \
+    chmod 644 /app/.coveragerc
 
 # Copy and set up configuration files
 COPY docker/config/logrotate.conf /etc/logrotate.d/markitdown

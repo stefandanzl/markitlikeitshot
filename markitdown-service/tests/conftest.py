@@ -1,6 +1,9 @@
-# markitdown-service/tests/conftest.py
+import os
 import pytest
+import asyncio
+from typing import AsyncGenerator, Generator
 from fastapi.testclient import TestClient
+from httpx import AsyncClient
 from sqlmodel import SQLModel, delete, Session, select
 from app.main import app
 from app.core.config import settings
@@ -9,6 +12,13 @@ from app.core.security.api_key import create_api_key
 from app.core.security.user import create_user
 from app.models.auth.api_key import Role, APIKey
 from app.models.auth.user import User, UserStatus
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator:
+    """Create an instance of the default event loop for each test case."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
 
 @pytest.fixture(scope="session", autouse=True)
 def init_test_db():
@@ -25,7 +35,19 @@ def db_session():
     try:
         yield session
     finally:
+        session.rollback()
         session.close()
+
+@pytest.fixture
+async def async_client() -> AsyncGenerator:
+    """Async client for testing async endpoints"""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
+
+@pytest.fixture
+def test_data_dir() -> str:
+    """Provide path to test data directory"""
+    return os.path.join(os.path.dirname(__file__), "test_files")
 
 @pytest.fixture
 def no_auth_client():
