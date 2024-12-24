@@ -1,7 +1,6 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import typer
 from rich.console import Console
-from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich.panel import Panel
 from enum import Enum
@@ -14,6 +13,13 @@ from app.db.session import get_db_session
 from sqlmodel import select
 import logging
 from app.cli.manage import display_version_info
+from app.cli.utils.menu_utils import (
+    handle_numeric_input,
+    safe_menu_action,
+    with_confirmation,
+    handle_menu_input,
+    format_table_row
+)
 
 # Initialize console and logger
 console = Console()
@@ -29,7 +35,7 @@ class MenuChoice(str, Enum):
     DEACTIVATE_KEY = "Deactivate API Key"
     REACTIVATE_KEY = "Reactivate API Key"
     VIEW_KEY = "View Key Details"
-    LOGS_MENU = "Log Management"  # Changed from ROTATE_LOGS to LOGS_MENU
+    LOGS_MENU = "Log Management"
     VERSION = "Show Version Info"
     EXIT = "Exit"
 
@@ -64,9 +70,8 @@ def display_menu() -> MenuChoice:
     valid_inputs = list(choice_map.keys()) + [choice.value for choice in MenuChoice]
     
     while True:
-        choice = Prompt.ask(
+        choice = handle_menu_input(
             "\n[cyan]Select an option[/cyan]",
-            show_choices=True,
             choices=valid_inputs
         )
         
@@ -103,9 +108,8 @@ def display_log_menu() -> LogMenuChoice:
     valid_inputs = list(choice_map.keys()) + [choice.value for choice in LogMenuChoice]
     
     while True:
-        choice = Prompt.ask(
+        choice = handle_menu_input(
             "\n[cyan]Select an option[/cyan]",
-            show_choices=True,
             choices=valid_inputs
         )
         
@@ -118,237 +122,200 @@ def display_log_menu() -> LogMenuChoice:
         
         console.print("[red]Invalid choice. Please try again.[/red]")
 
+@safe_menu_action
 def create_user_menu():
     """Interactive menu for creating a new user."""
-    try:
-        name = Prompt.ask("[cyan]Enter name for the user[/cyan]")
-        email = Prompt.ask("[cyan]Enter email address[/cyan]")
-        
-        if Confirm.ask("[cyan]Create user with these settings?[/cyan]"):
-            typer.echo()
-            user_commands.create(
-                name=name,
-                email=email
-            )
-    except Exception as e:
-        logger.exception("Failed to create user")
-        console.print(f"[red]Error creating user: {str(e)}[/red]")
+    name = handle_menu_input("[cyan]Enter name for the user[/cyan]", [])
+    email = handle_menu_input("[cyan]Enter email address[/cyan]", [])
+    
+    with_confirmation(
+        "create user with these settings",
+        user_commands.create,
+        name=name,
+        email=email
+    )
 
+@safe_menu_action
 def list_users_menu():
     """Interactive menu for listing users."""
-    try:
-        show_inactive = Confirm.ask(
-            "[cyan]Show inactive users?[/cyan]",
-            default=False
-        )
-        
-        format_output = Prompt.ask(
-            "[cyan]Output format[/cyan]",
-            choices=["table", "json"],
-            default="table"
-        )
-        
-        typer.echo()
-        user_commands.list(
-            show_inactive=show_inactive,
-            format_type=format_output
-        )
-    except Exception as e:
-        logger.exception("Failed to list users")
-        console.print(f"[red]Error listing users: {str(e)}[/red]")
+    show_inactive = handle_menu_input(
+        "[cyan]Show inactive users?[/cyan]",
+        choices=["y", "n"],
+        default="n"
+    ) == "y"
+    
+    format_output = handle_menu_input(
+        "[cyan]Output format[/cyan]",
+        choices=["table", "json"],
+        default="table"
+    )
+    
+    typer.echo()
+    user_commands.list(
+        show_inactive=show_inactive,
+        format_type=format_output
+    )
 
+@safe_menu_action
 def view_user_menu():
     """Interactive menu for viewing user details."""
-    try:
-        user_id_str = Prompt.ask("[cyan]Enter user ID to view[/cyan]")
-        try:
-            user_id = int(user_id_str)
-            typer.echo()
-            user_commands.info(user_id=user_id)
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to view user")
-        console.print(f"[red]Error viewing user: {str(e)}[/red]")
+    user_id = handle_numeric_input("[cyan]Enter user ID to view[/cyan]")
+    typer.echo()
+    user_commands.info(user_id=user_id)
 
+@safe_menu_action
 def manage_user_status_menu():
     """Interactive menu for managing user status."""
-    try:
-        user_id_str = Prompt.ask("[cyan]Enter user ID[/cyan]")
-        try:
-            user_id = int(user_id_str)
-            action = Prompt.ask(
-                "[cyan]Choose action[/cyan]",
-                choices=["activate", "deactivate"]
-            )
-            
-            if Confirm.ask(f"[yellow]Are you sure you want to {action} user {user_id}?[/yellow]"):
-                typer.echo()
-                if action == "activate":
-                    user_commands.activate(user_id=user_id, force=True)
-                else:
-                    user_commands.deactivate(user_id=user_id, force=True)
-                    
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to manage user status")
-        console.print(f"[red]Error managing user status: {str(e)}[/red]")
+    user_id = handle_numeric_input("[cyan]Enter user ID[/cyan]")
+    action = handle_menu_input(
+        "[cyan]Choose action[/cyan]",
+        choices=["activate", "deactivate"]
+    )
+    
+    typer.echo()
+    if action == "activate":
+        with_confirmation(
+            f"activate user {user_id}",
+            user_commands.activate,
+            user_id=user_id,
+            force=True
+        )
+    else:
+        with_confirmation(
+            f"deactivate user {user_id}",
+            user_commands.deactivate,
+            user_id=user_id,
+            force=True
+        )
 
-def log_management_menu():
-    """Interactive menu for log management."""
-    try:
-        while True:
-            choice = display_log_menu()
-            
-            if choice == LogMenuChoice.BACK:
-                break
-            
-            typer.echo()
-            
-            if choice == LogMenuChoice.VIEW_STATUS:
-                log_commands.status()
-            elif choice == LogMenuChoice.LIST_FILES:
-                log_commands.list()
-            elif choice == LogMenuChoice.ROTATE_LOGS:
-                if Confirm.ask("[cyan]Rotate all log files now?[/cyan]"):
-                    log_commands.rotate()
-            elif choice == LogMenuChoice.CLEANUP_LOGS:
-                if Confirm.ask("[yellow]Clean up old log files?[/yellow]"):
-                    log_commands.cleanup()
-            
-            if choice != LogMenuChoice.BACK:
-                Prompt.ask("\n[cyan]Press Enter to continue[/cyan]")
-                
-    except Exception as e:
-        logger.exception("Log management error")
-        console.print(f"[red]Error in log management: {str(e)}[/red]")
-
+@safe_menu_action
 def create_key_menu():
     """Interactive menu for creating a new API key."""
-    try:
-        # First, list available users
-        console.print("\n[cyan]Available Users:[/cyan]")
-        with get_db_session() as db:
-            query = select(User).where(User.status == UserStatus.ACTIVE)
-            users = db.exec(query).all()
-            
-            if not users:
-                console.print("[yellow]No active users found[/yellow]")
-                return
-            
-            # Display users in a simple table
-            table = Table(title="Active Users")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name", style="green")
-            table.add_column("Email", style="blue")
-            
-            for user in users:
-                table.add_row(str(user.id), user.name, user.email)
-            
-            console.print(table)
+    # First, list available users
+    console.print("\n[cyan]Available Users:[/cyan]")
+    with get_db_session() as db:
+        query = select(User).where(User.status == UserStatus.ACTIVE)
+        users = db.exec(query).all()
         
-        user_id_str = Prompt.ask("[cyan]Enter user ID for the key[/cyan]")
-        try:
-            user_id = int(user_id_str)
-            name = Prompt.ask("[cyan]Enter name for the key[/cyan]")
-            role_str = Prompt.ask(
-                "[cyan]Select role[/cyan]",
-                choices=["admin", "user"],
-                default="user"
-            )
-            
-            # Convert string role to Role enum
-            role = Role.ADMIN if role_str.lower() == "admin" else Role.USER
-            
-            if Confirm.ask("[cyan]Create API key with these settings?[/cyan]"):
-                typer.echo()
-                api_key_commands.create(
-                    name=name,
-                    role=role,
-                    user_id=user_id
-                )
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to create API key")
-        console.print(f"[red]Error creating API key: {str(e)}[/red]")
+        if not users:
+            console.print("[yellow]No active users found[/yellow]")
+            return
+        
+        # Display users in a simple table
+        table = Table(title="Active Users")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name", style="green")
+        table.add_column("Email", style="blue")
+        
+        for user in users:
+            table.add_row(*format_table_row(
+                user.id, user.name, user.email,
+                styles=["cyan", "green", "blue"]
+            ))
+        
+        console.print(table)
+    
+    user_id = handle_numeric_input("[cyan]Enter user ID for the key[/cyan]")
+    name = handle_menu_input("[cyan]Enter name for the key[/cyan]", [])
+    role_str = handle_menu_input(
+        "[cyan]Select role[/cyan]",
+        choices=["admin", "user"],
+        default="user"
+    )
+    
+    # Convert string role to Role enum
+    role = Role.ADMIN if role_str.lower() == "admin" else Role.USER
+    
+    with_confirmation(
+        "create API key with these settings",
+        api_key_commands.create,
+        name=name,
+        role=role,
+        user_id=user_id
+    )
 
+@safe_menu_action
 def list_keys_menu():
     """Interactive menu for listing API keys."""
-    try:
-        show_inactive = Confirm.ask(
-            "[cyan]Show inactive keys?[/cyan]",
-            default=False
-        )
-        
-        format_output = Prompt.ask(
-            "[cyan]Output format[/cyan]",
-            choices=["table", "json"],
-            default="table"
-        )
-        
-        typer.echo()
-        api_key_commands.list(
-            show_inactive=show_inactive,
-            format=format_output
-        )
-    except Exception as e:
-        logger.exception("Failed to list API keys")
-        console.print(f"[red]Error listing API keys: {str(e)}[/red]")
+    show_inactive = handle_menu_input(
+        "[cyan]Show inactive keys?[/cyan]",
+        choices=["y", "n"],
+        default="n"
+    ) == "y"
+    
+    format_output = handle_menu_input(
+        "[cyan]Output format[/cyan]",
+        choices=["table", "json"],
+        default="table"
+    )
+    
+    typer.echo()
+    api_key_commands.list(
+        show_inactive=show_inactive,
+        format=format_output
+    )
 
+@safe_menu_action
 def deactivate_key_menu():
     """Interactive menu for deactivating an API key."""
-    try:
-        key_id_str = Prompt.ask("[cyan]Enter API key ID to deactivate[/cyan]")
-        try:
-            key_id = int(key_id_str)
-            
-            if Confirm.ask(f"[yellow]Are you sure you want to deactivate key {key_id}?[/yellow]"):
-                typer.echo()
-                api_key_commands.deactivate(
-                    key_id=key_id,
-                    force=True
-                )
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to deactivate API key")
-        console.print(f"[red]Error deactivating API key: {str(e)}[/red]")
+    key_id = handle_numeric_input("[cyan]Enter API key ID to deactivate[/cyan]")
+    
+    with_confirmation(
+        f"deactivate key {key_id}",
+        api_key_commands.deactivate,
+        key_id=key_id,
+        force=True
+    )
 
+@safe_menu_action
 def reactivate_key_menu():
     """Interactive menu for reactivating an API key."""
-    try:
-        key_id_str = Prompt.ask("[cyan]Enter API key ID to reactivate[/cyan]")
-        try:
-            key_id = int(key_id_str)
-            
-            if Confirm.ask(f"[yellow]Are you sure you want to reactivate key {key_id}?[/yellow]"):
-                typer.echo()
-                api_key_commands.reactivate(
-                    key_id=key_id,
-                    force=True
-                )
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to reactivate API key")
-        console.print(f"[red]Error reactivating API key: {str(e)}[/red]")
+    key_id = handle_numeric_input("[cyan]Enter API key ID to reactivate[/cyan]")
+    
+    with_confirmation(
+        f"reactivate key {key_id}",
+        api_key_commands.reactivate,
+        key_id=key_id,
+        force=True
+    )
 
+@safe_menu_action
 def view_key_menu():
     """Interactive menu for viewing API key details."""
-    try:
-        key_id_str = Prompt.ask("[cyan]Enter API key ID to view[/cyan]")
-        try:
-            key_id = int(key_id_str)
-            typer.echo()
-            api_key_commands.info(key_id=key_id)
-        except ValueError:
-            console.print("[red]Invalid input: Please enter a valid number[/red]")
-    except Exception as e:
-        logger.exception("Failed to view API key")
-        console.print(f"[red]Error viewing API key: {str(e)}[/red]")
+    key_id = handle_numeric_input("[cyan]Enter API key ID to view[/cyan]")
+    typer.echo()
+    api_key_commands.info(key_id=key_id)
 
+@safe_menu_action
+def log_management_menu():
+    """Interactive menu for log management."""
+    while True:
+        choice = display_log_menu()
+        
+        if choice == LogMenuChoice.BACK:
+            break
+        
+        typer.echo()
+        
+        if choice == LogMenuChoice.VIEW_STATUS:
+            log_commands.status()
+        elif choice == LogMenuChoice.LIST_FILES:
+            log_commands.list()
+        elif choice == LogMenuChoice.ROTATE_LOGS:
+            with_confirmation(
+                "rotate all log files now",
+                log_commands.rotate
+            )
+        elif choice == LogMenuChoice.CLEANUP_LOGS:
+            with_confirmation(
+                "clean up old log files",
+                log_commands.cleanup
+            )
+        
+        if choice != LogMenuChoice.BACK:
+            handle_menu_input("\n[cyan]Press Enter to continue[/cyan]", [""])
+
+@safe_menu_action
 def interactive_menu():
     """Main interactive menu loop."""
     try:
@@ -385,14 +352,10 @@ def interactive_menu():
                 display_version_info()
             
             if choice != MenuChoice.EXIT:
-                Prompt.ask("\n[cyan]Press Enter to continue[/cyan]")
+                handle_menu_input("\n[cyan]Press Enter to continue[/cyan]", [""])
                 
     except KeyboardInterrupt:
         console.print("\n[yellow]Goodbye![/yellow]")
-    except Exception as e:
-        logger.exception("Interactive menu error")
-        console.print(f"[red]An error occurred: {str(e)}[/red]")
-        raise typer.Exit(1)
 
 app = typer.Typer()
 
