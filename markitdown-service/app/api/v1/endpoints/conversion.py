@@ -212,10 +212,18 @@ def get_rate_limit_headers(request: Request) -> dict:
     remaining = settings.RATE_LIMIT_REQUESTS - 1  # Default to max - 1 for current request
     
     # First try slowapi's view_rate_limit
-    if view_rate_limit and isinstance(view_rate_limit, dict):
-        remaining = view_rate_limit.get("remaining", remaining)
-        if "reset" in view_rate_limit:
-            window_reset = view_rate_limit["reset"]
+    if view_rate_limit:
+        if isinstance(view_rate_limit, tuple):
+            # Extract rate limit info from tuple (info, limit_value, period)
+            rate_limit_data = view_rate_limit[0]
+            if isinstance(rate_limit_data, dict):
+                remaining = rate_limit_data.get("remaining", remaining)
+                if "reset" in rate_limit_data:
+                    window_reset = rate_limit_data["reset"]
+        elif isinstance(view_rate_limit, dict):
+            remaining = view_rate_limit.get("remaining", remaining)
+            if "reset" in view_rate_limit:
+                window_reset = view_rate_limit["reset"]
     # Fall back to our _rate_limit_info
     elif rate_limit_info and isinstance(rate_limit_info, dict):
         remaining = rate_limit_info.get("remaining", remaining)

@@ -5,6 +5,7 @@ from unittest.mock import patch
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from app.core.rate_limiting.limiter import limiter
+from app.core.rate_limiting.middleware import RateLimitItem
 
 @pytest.fixture(autouse=True)
 def mock_rate_limit():
@@ -21,23 +22,27 @@ def mock_rate_limit():
         
         if request_count > 10:  # Simulate rate limit exceeded
             # Set rate limit info before raising exception
+            key = "rate_limit_test"
+            rate_limit_item = RateLimitItem(amount=10, key=key)
             rate_limit_info = {
                 "limit": 10,
                 "remaining": 0,
                 "reset": window_reset
             }
             request.state._rate_limit_info = rate_limit_info
-            request.state.view_rate_limit = (rate_limit_info, 10, "minute")
-            raise RateLimitExceeded("10 per 1 minute")
+            request.state.view_rate_limit = (rate_limit_item, [key, 10, window_reset], "minute")
+            raise RateLimitExceeded(rate_limit_item)
         
         # Set rate limit info for successful request
+        key = "rate_limit_test"
+        rate_limit_item = RateLimitItem(amount=10, key=key)
         rate_limit_info = {
             "limit": 10,
             "remaining": 10 - request_count,
             "reset": window_reset
         }
         request.state._rate_limit_info = rate_limit_info
-        request.state.view_rate_limit = (rate_limit_info, 10, "minute")
+        request.state.view_rate_limit = (rate_limit_item, [key, 10, window_reset], "minute")
         return True
     
     with patch('slowapi.extension.Limiter._check_request_limit', side_effect=mock_check):

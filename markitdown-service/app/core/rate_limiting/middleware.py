@@ -4,6 +4,16 @@ from starlette.types import ASGIApp
 import time
 from app.core.config.settings import settings
 
+class RateLimitItem:
+    """Class that provides the interface slowapi expects for rate limiting"""
+    def __init__(self, amount: int, key: str):
+        self.amount = amount
+        self.key = key
+        self.error_message = f"{amount} per {settings.RATE_LIMIT_PERIOD}"
+
+    def key_for(self, *args):
+        return self.key
+
 class RateLimitStateMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
@@ -14,26 +24,34 @@ class RateLimitStateMiddleware(BaseHTTPMiddleware):
         window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
         window_reset = now + window_seconds
 
-        # Initialize rate limit info if not present
-        if not hasattr(request.state, "_rate_limit_info"):
-            rate_limit_info = {
-                "limit": settings.RATE_LIMIT_REQUESTS,
-                "remaining": settings.RATE_LIMIT_REQUESTS - 1,  # Subtract 1 for current request
-                "reset": window_reset
-            }
-            request.state._rate_limit_info = rate_limit_info
-            # Set view_rate_limit in slowapi expected format: (limit_data, limit_value, period)
-            request.state.view_rate_limit = (rate_limit_info, (settings.RATE_LIMIT_REQUESTS,), settings.RATE_LIMIT_PERIOD)
+        # Initialize rate limit info
+        key = f"rate_limit_{request.url.path}"
+        rate_limit_item = RateLimitItem(amount=settings.RATE_LIMIT_REQUESTS, key=key)
+        
+        # Set view_rate_limit in slowapi expected format
+        request.state.view_rate_limit = (
+            rate_limit_item, 
+            [key, settings.RATE_LIMIT_REQUESTS, window_reset],
+            settings.RATE_LIMIT_PERIOD
+        )
 
         # Process the request
         response = await call_next(request)
 
-        # Update rate limit info after processing
-        rate_limit_info = request.state._rate_limit_info
-        if isinstance(rate_limit_info, dict):
-            # Ensure remaining count doesn't go below 0
-            rate_limit_info["remaining"] = max(0, rate_limit_info["remaining"])
-            # Keep view_rate_limit in sync with updated info
-            request.state.view_rate_limit = (rate_limit_info, (settings.RATE_LIMIT_REQUESTS,), settings.RATE_LIMIT_PERIOD)
+        # Clear any existing rate limit headers to prevent duplicates
+        headers_to_set = {
+            "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
+            "X-RateLimit-Reset": str(window_reset),
+            "X-RateLimit-Remaining": str(max(0, settings.RATE_LIMIT_REQUESTS - 1)),
+            "Retry-After": str(window_seconds)
+        }
+        
+        # Remove any existing rate limit headers
+        for header in headers_to_set.keys():
+            if header in response.headers:
+                del response.headers[header]
+        
+        # Set fresh headers
+        response.headers.update(headers_to_set)
 
         return response
