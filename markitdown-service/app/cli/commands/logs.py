@@ -40,7 +40,7 @@ def cleanup(
     """Clean up old log files."""
     try:
         manager = LogManager()
-        manager.cleanup_logs(force=force)
+        manager.cleanup_old_logs()  # Changed to match actual method name
         console.print("[green]Old logs cleaned up successfully[/green]")
     except Exception as e:
         console.print(f"[red]Error cleaning up logs: {str(e)}[/red]")
