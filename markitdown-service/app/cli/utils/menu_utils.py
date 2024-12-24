@@ -86,12 +86,17 @@ def handle_menu_input(
     
     Args:
         prompt: The prompt to display
-        choices: List of valid choices
+        choices: List of valid choices. Empty list for free-form input.
         default: Optional default choice
         
     Returns:
-        str: The selected choice
+        str: The selected choice or entered text
     """
+    if not choices:
+        # Free-form text input
+        return Prompt.ask(prompt, default=default)
+    
+    # Choice-based input
     return Prompt.ask(
         prompt,
         choices=choices,
