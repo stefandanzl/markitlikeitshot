@@ -138,6 +138,10 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
+# Add rate limit state middleware
+from app.core.rate_limiting.middleware import RateLimitStateMiddleware
+app.add_middleware(RateLimitStateMiddleware)
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -149,17 +153,20 @@ app.add_middleware(
 
 # Custom rate limit exceeded handler
 @app.exception_handler(RateLimitExceeded)
-async def custom_rate_limit_handler(request, exc):
+async def custom_rate_limit_handler(request, exc: RateLimitExceeded):
     """Handle rate limit exceeded exceptions."""
     now = int(time.time())
-    if settings.RATE_LIMIT_PERIOD == "minute":
-        window_seconds = 60
-    elif settings.RATE_LIMIT_PERIOD == "hour":
-        window_seconds = 3600
-    else:
-        window_seconds = 60  # Default to minute if unknown period
-        
+    window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
     window_reset = now + window_seconds
+    
+    # Set rate limit info for exceeded state
+    rate_limit_info = {
+        "limit": settings.RATE_LIMIT_REQUESTS,
+        "remaining": 0,
+        "reset": window_reset
+    }
+    request.state._rate_limit_info = rate_limit_info
+    request.state.view_rate_limit = (rate_limit_info, settings.RATE_LIMIT_REQUESTS, settings.RATE_LIMIT_PERIOD)
     
     # Log rate limit violation with client info
     security_logger.warning(
@@ -185,7 +192,7 @@ async def custom_rate_limit_handler(request, exc):
     return JSONResponse(
         status_code=429,
         content={
-            "detail": "Rate limit exceeded",
+            "detail": str(exc),
             "type": "rate_limit_exceeded"
         },
         headers={

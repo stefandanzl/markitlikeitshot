@@ -91,7 +91,7 @@ services:
       - ADMIN_API_KEY=test-admin-key
       - LOG_LEVEL=WARNING
     entrypoint: python -m pytest
-    command: tests/test_endpoints.py -v --capture=no -c /app/pytest.ini
+    command: tests/ -v --capture=no -c /app/pytest.ini
     profiles:
       - test
 
