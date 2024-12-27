@@ -12,16 +12,20 @@ class AuditAction(str, Enum):
     # User Actions
     USER_CREATED = "create_user"
     USER_STATUS_UPDATED = "update_user_status"
+    USER_DEACTIVATED = "user_deactivated"
+    USER_ACTIVATED = "user_activated"
     
     # Service Actions
     SERVICE_STARTUP = "service_startup"
     SERVICE_SHUTDOWN = "service_shutdown"
     HEALTH_CHECK = "health_check"
-    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     
     # Conversion Actions
     CONVERT_TEXT = "convert_text"
     CONVERT_FILE = "convert_file"
     CONVERT_URL = "convert_url"
+    
+    # Rate Limiting Actions
+    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
 
 __all__ = ["AuditAction"]

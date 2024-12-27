@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, status, Request, Depends
+from fastapi import APIRouter, UploadFile, File, status, Request, Depends, Response
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, HttpUrl
 from typing import Optional, Dict, Any
@@ -14,7 +14,6 @@ from app.core.security.api_key import get_api_key
 from app.core.config.settings import settings
 from app.core.errors.handlers import handle_api_operation, DEFAULT_ERROR_MAP
 from app.core.errors.exceptions import FileProcessingError, ConversionError, ContentTypeError
-from app.core.rate_limiting.limiter import limiter
 from app.core.validation.validators import (
     validate_file_size,
     validate_file_extension,
@@ -23,6 +22,8 @@ from app.core.validation.validators import (
     validate_upload_file,
     validate_text_input
 )
+from app.core.rate_limiting.limiter import rate_limit, RateLimitExceeded
+from app.models.auth.api_key import APIKey  # Add this import
 
 # Initialize router
 router = APIRouter(tags=["conversion"])
@@ -30,13 +31,6 @@ router = APIRouter(tags=["conversion"])
 # Initialize module-specific logger
 logger = logging.getLogger("app.api.conversion")
 perf_logger = logging.getLogger("app.api.conversion.performance")
-
-# Custom response class for rate limiting
-class RateLimitedResponse(PlainTextResponse):
-    def __init__(self, content: str, status_code: int = 200, headers: dict = None, **kwargs):
-        super().__init__(content, status_code=status_code, **kwargs)
-        if headers:
-            self.headers.update(headers)
 
 class TextInput(BaseModel):
     content: str
@@ -200,166 +194,72 @@ def process_conversion(file_path: str, ext: str, url: Optional[str] = None, cont
         )
         raise ConversionError(f"Failed to convert content: {str(e)}")
 
-def get_rate_limit_headers(request: Request) -> dict:
-    """Get rate limit headers from request state"""
-    now = int(time.time())
-    window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
-    window_reset = now + window_seconds
-    remaining = settings.RATE_LIMIT_REQUESTS - 1  # Default to max - 1 for current request
-    
-    # Get rate limit info from slowapi's view_rate_limit
-    view_rate_limit = getattr(request.state, "view_rate_limit", None)
-    
-    if view_rate_limit:
-        # Handle both tuple formats (RateLimitItem, list) or (dict, limit, period)
-        if isinstance(view_rate_limit, tuple):
-            if len(view_rate_limit) >= 2:  # We only need the first two elements
-                rate_limit_data = view_rate_limit[1]  # Get the second element which contains the limit info
-                if isinstance(rate_limit_data, list) and len(rate_limit_data) >= 3:
-                    _, limit, reset = rate_limit_data
-                    window_reset = reset
-                    remaining = limit - 1
-    
-    return {
-        "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-        "X-RateLimit-Remaining": str(max(0, remaining)),
-        "X-RateLimit-Reset": str(window_reset),
-        "Retry-After": str(window_seconds)
-    }
-
 @router.post(
     "/convert/text",
-    response_class=RateLimitedResponse,
-    responses={
-        200: {
-            "description": "Successfully converted text to markdown",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Remaining": {
-                    "description": "The number of requests remaining in the current time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        },
-        429: {
-            "description": "Rate limit exceeded",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        }
-    }
+    response_class=PlainTextResponse
 )
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_text",
     pre_validators=[validate_text_request],
     error_map={
         FileProcessingError: (status.HTTP_400_BAD_REQUEST, None),
         ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+        RateLimitExceeded: (status.HTTP_429_TOO_MANY_REQUESTS, None),
         **DEFAULT_ERROR_MAP
     }
 )
 async def convert_text(
     request: Request,
+    response: Response,
     text_input: TextInput,
-    api_key: str = Depends(get_api_key)
+    api_key: APIKey = Depends(get_api_key)
 ):
     """Convert text or HTML to markdown."""
+    # Apply rate limiting
+    await rate_limit(
+        rate=settings.RATE_LIMITS["/api/v1/convert/text"]["rate"],
+        per=settings.RATE_LIMITS["/api/v1/convert/text"]["per"]
+    )(request, response)
+
     log_conversion_attempt(
         "text",
         {
             "content_length": len(text_input.content),
             "has_options": bool(text_input.options)
         },
-        getattr(api_key, 'id', None)
+        str(api_key.id) if api_key else None
     )
     
     with save_temp_file(text_input.content.encode('utf-8'), suffix='.html') as temp_file_path:
         markdown_content = process_conversion(temp_file_path, '.html')
-        headers = get_rate_limit_headers(request)
-        return RateLimitedResponse(content=markdown_content, headers=headers)
+        return PlainTextResponse(content=markdown_content)
 
 @router.post(
     "/convert/file",
-    response_class=RateLimitedResponse,
-    responses={
-        200: {
-            "description": "Successfully converted file to markdown",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Remaining": {
-                    "description": "The number of requests remaining in the current time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        },
-        429: {
-            "description": "Rate limit exceeded",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        }
-    }
+    response_class=PlainTextResponse
 )
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_file",
     pre_validators=[validate_file_request],
     error_map={
         ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+        RateLimitExceeded: (status.HTTP_429_TOO_MANY_REQUESTS, None),
         **DEFAULT_ERROR_MAP
     }
 )
 async def convert_file(
     request: Request,
+    response: Response,  # Add response parameter
     file: UploadFile = File(...),
-    api_key: str = Depends(get_api_key)
-) -> RateLimitedResponse:
+    api_key: APIKey = Depends(get_api_key)
+) -> PlainTextResponse:
     """Convert an uploaded file to markdown."""
+    # Apply rate limiting
+    await rate_limit(
+        rate=settings.RATE_LIMITS["/api/v1/convert/file"]["rate"],
+        per=settings.RATE_LIMITS["/api/v1/convert/file"]["per"]
+    )(request, response)
+
     ext, content = await validate_upload_file(file=file)
     
     log_conversion_attempt(
@@ -368,8 +268,8 @@ async def convert_file(
             "filename": file.filename,
             "content_type": file.content_type,
             "extension": ext,
-            "user_id": getattr(api_key, 'id', None)
-        }
+        },
+        str(api_key.id) if api_key else None
     )
     
     with save_temp_file(content, suffix=ext) as temp_file_path:
@@ -379,58 +279,15 @@ async def convert_file(
             content_type=file.content_type
         )
         
-        headers = get_rate_limit_headers(request)
-        return RateLimitedResponse(
+        return PlainTextResponse(
             content=markdown_content,
-            headers=headers,
             status_code=status.HTTP_200_OK
         )
 
 @router.post(
     "/convert/url",
-    response_class=RateLimitedResponse,
-    responses={
-        200: {
-            "description": "Successfully converted URL content to markdown",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Remaining": {
-                    "description": "The number of requests remaining in the current time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        },
-        429: {
-            "description": "Rate limit exceeded",
-            "headers": {
-                "X-RateLimit-Limit": {
-                    "description": "The maximum number of requests allowed per time window",
-                    "schema": {"type": "integer"}
-                },
-                "X-RateLimit-Reset": {
-                    "description": "The time at which the current rate limit window resets in UTC epoch seconds",
-                    "schema": {"type": "integer"}
-                },
-                "Retry-After": {
-                    "description": "The number of seconds to wait before making another request",
-                    "schema": {"type": "integer"}
-                }
-            }
-        }
-    }
+    response_class=PlainTextResponse
 )
-@limiter.limit(f"{settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
 @handle_api_operation(
     "convert_url",
     error_map={
@@ -440,21 +297,29 @@ async def convert_file(
         ContentTypeError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
         ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
         FileProcessingError: (status.HTTP_400_BAD_REQUEST, None),
+        RateLimitExceeded: (status.HTTP_429_TOO_MANY_REQUESTS, None),
     }
 )
 async def convert_url(
     request: Request,
+    response: Response,  # Add response parameter
     url_input: UrlInput,
-    api_key: str = Depends(get_api_key)
-) -> RateLimitedResponse:
+    api_key: APIKey = Depends(get_api_key)
+) -> PlainTextResponse:
     """Fetch a URL and convert its content to markdown."""
+    # Apply rate limiting
+    await rate_limit(
+        rate=settings.RATE_LIMITS["/api/v1/convert/url"]["rate"],
+        per=settings.RATE_LIMITS["/api/v1/convert/url"]["per"]
+    )(request, response)
+
     log_conversion_attempt(
         "url",
         {
             "url": str(url_input.url),
             "has_options": bool(url_input.options),
-            "user_id": getattr(api_key, 'id', None)
-        }
+        },
+        str(api_key.id) if api_key else None
     )
 
     response = requests.get(
@@ -478,9 +343,7 @@ async def convert_url(
             url=str(url_input.url)
         )
         
-        headers = get_rate_limit_headers(request)
-        return RateLimitedResponse(
+        return PlainTextResponse(
             content=markdown_content,
-            headers=headers,
             status_code=status.HTTP_200_OK
         )

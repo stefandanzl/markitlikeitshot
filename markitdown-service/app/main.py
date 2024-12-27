@@ -2,24 +2,23 @@ import time
 import logging
 import logging.config
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi.middleware import SlowAPIMiddleware
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import text
 import os
 from pathlib import Path
-from app.api.v1.endpoints import conversion
+from app.api.v1.endpoints import conversion, admin
 from app.core.security.api_key import get_api_key
 from app.db.init_db import ensure_db_initialized
 from app.db.session import get_db, get_db_session
 from app.core.config.settings import settings
-from app.core.rate_limiting.limiter import limiter
 from app.core.logging.config import get_web_logging_config
 from app.core.audit import audit_log, AuditAction
 from app.core.logging.management import LogManager
+from app.core.rate_limiting.middleware import RateLimitMiddleware
+from app.core.errors.handlers import handle_api_operation
 
 # Initialize logging
 log_dir = Path(settings.LOG_DIR)
@@ -36,6 +35,24 @@ logger = logging.getLogger(__name__)
 api_logger = logging.getLogger("app.api")
 db_logger = logging.getLogger("app.db")
 security_logger = logging.getLogger("app.core.security")
+
+# Global exception handler
+@handle_api_operation("global_exception_handler")
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception occurred", extra={"path": request.url.path})
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Please try again later."}
+    )
+
+# Request Validation Error Handler
+@handle_api_operation("validation_exception_handler")
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning("Request validation failed", extra={"errors": exc.errors(), "body": exc.body})
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Invalid request parameters", "errors": exc.errors()}
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -56,7 +73,6 @@ async def lifespan(app: FastAPI):
         logger.debug(f"Environment: {settings.ENVIRONMENT}")
         logger.debug(f"Log Level: {settings.LOG_LEVEL}")
         logger.debug(f"API Key Auth: {settings.API_KEY_AUTH_ENABLED}")
-        logger.debug(f"Rate Limit: {settings.RATE_LIMIT_REQUESTS}/{settings.RATE_LIMIT_PERIOD}")
         logger.debug(f"Log Directory: {settings.LOG_DIR}")
         
         # Initialize database
@@ -134,13 +150,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add rate limiter to app
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
-
-# Add rate limit state middleware
-from app.core.rate_limiting.middleware import RateLimitStateMiddleware
-app.add_middleware(RateLimitStateMiddleware)
+# Add rate limiting
+app.add_middleware(RateLimitMiddleware)
 
 # Configure CORS
 app.add_middleware(
@@ -151,57 +162,9 @@ app.add_middleware(
     allow_headers=settings.ALLOWED_HEADERS,
 )
 
-# Custom rate limit exceeded handler
-@app.exception_handler(RateLimitExceeded)
-async def custom_rate_limit_handler(request, exc: RateLimitExceeded):
-    """Handle rate limit exceeded exceptions."""
-    now = int(time.time())
-    window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
-    window_reset = now + window_seconds
-    
-    # Set rate limit info for exceeded state
-    rate_limit_info = {
-        "limit": settings.RATE_LIMIT_REQUESTS,
-        "remaining": 0,
-        "reset": window_reset
-    }
-    request.state._rate_limit_info = rate_limit_info
-    request.state.view_rate_limit = (rate_limit_info, settings.RATE_LIMIT_REQUESTS, settings.RATE_LIMIT_PERIOD)
-    
-    # Log rate limit violation with client info
-    security_logger.warning(
-        "Rate limit exceeded",
-        extra={
-            "client_ip": get_remote_address(request),
-            "path": request.url.path,
-            "reset_time": window_reset
-        }
-    )
-    
-    audit_log(
-        action=AuditAction.RATE_LIMIT_EXCEEDED,
-        user_id=None,
-        details={
-            "client_ip": get_remote_address(request),
-            "path": request.url.path,
-            "reset_time": window_reset
-        },
-        status="failure"
-    )
-    
-    return JSONResponse(
-        status_code=429,
-        content={
-            "detail": str(exc),
-            "type": "rate_limit_exceeded"
-        },
-        headers={
-            "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": str(window_reset),
-            "Retry-After": str(window_seconds)
-        }
-    )
+# Add exception handlers
+app.add_exception_handler(Exception, global_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
 # Include routers with API key dependency
 app.include_router(
@@ -211,8 +174,16 @@ app.include_router(
     dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
 )
 
+# Include admin router with API key dependency
+app.include_router(
+    admin.router,
+    prefix=settings.API_V1_STR,
+    dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
+)
+
 # Health check endpoint (no API key required)
 @app.get("/health", tags=["system"])
+@handle_api_operation("health_check")
 async def health_check():
     """Check the health of the service."""
     try:
@@ -243,14 +214,18 @@ async def health_check():
             "auth_enabled": settings.API_KEY_AUTH_ENABLED,
             "supported_formats": settings.SUPPORTED_EXTENSIONS,
             "database": "connected",
-            "rate_limit": {
-                "requests": settings.RATE_LIMIT_REQUESTS,
-                "period": settings.RATE_LIMIT_PERIOD
-            },
             "logging": {
                 "status": log_status,
                 "directory": str(log_dir),
                 "error": log_error
+            },
+            "rate_limiting": {
+                "enabled": settings.RATE_LIMITING_ENABLED,
+                "default_rate": settings.RATE_LIMIT_DEFAULT_RATE
+            },
+            "api_key_auth": {
+                "enabled": settings.API_KEY_AUTH_ENABLED,
+                "header_name": settings.API_KEY_HEADER_NAME
             }
         }
         

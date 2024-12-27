@@ -8,7 +8,10 @@ from app.core.audit import audit_log, AuditAction
 import time
 from app.core.errors.base import OperationError
 from app.core.errors.exceptions import FileProcessingError, ConversionError
+from app.core.rate_limiting.limiter import RateLimitExceeded
+from sqlalchemy.exc import SQLAlchemyError
 import inspect
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,8 @@ DEFAULT_ERROR_MAP = {
     requests.RequestException: (status.HTTP_502_BAD_GATEWAY, None),
     ConversionError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
     OperationError: (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+    RateLimitExceeded: (status.HTTP_429_TOO_MANY_REQUESTS, None),
+    SQLAlchemyError: (status.HTTP_500_INTERNAL_SERVER_ERROR, "Database error occurred"),
     Exception: (status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal server error")
 }
 
@@ -188,10 +193,13 @@ def handle_api_operation(
                     "duration": duration,
                     "error_type": actual_exception.__class__.__name__,
                     "error_message": str(actual_exception),
-                    "status_code": status_code
+                    "status_code": status_code,
+                    "operation": operation_name,
+                    "user_id": user_id,
                 }
                 
                 if status_code >= 500:
+                    log_data["traceback"] = traceback.format_exc()
                     logger.exception(f"{operation_name} failed", extra=log_data)
                 else:
                     logger.warning(f"{operation_name} error", extra=log_data)
@@ -206,7 +214,11 @@ def handle_api_operation(
                         status="failure"
                     )
                 
-                raise HTTPException(status_code=status_code, detail=detail)
+                # Ensure we always return a proper HTTP response
+                if isinstance(actual_exception, HTTPException):
+                    raise actual_exception
+                else:
+                    raise HTTPException(status_code=status_code, detail=detail)
                 
         return wrapper
     return decorator

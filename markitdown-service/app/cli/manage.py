@@ -66,12 +66,11 @@ def display_version_info():
     table.add_row("Log Level", settings.LOG_LEVEL)
     table.add_row("API Auth Enabled", str(settings.API_KEY_AUTH_ENABLED))
     table.add_row("Database URL", settings.DATABASE_URL)
-    table.add_row("Rate Limit", f"{settings.RATE_LIMIT_REQUESTS} requests per {settings.RATE_LIMIT_PERIOD}")
     table.add_row("Max File Size", f"{settings.MAX_FILE_SIZE / (1024*1024):.1f} MB")
     
     # Add user management info
     with get_db_session() as db:
-        users = db.exec(select(User)).all()
+        users = db.execute(select(User)).scalars().all()
         user_count = len(users)
         active_users = sum(1 for user in users if user.status == UserStatus.ACTIVE)
         
@@ -79,7 +78,7 @@ def display_version_info():
         table.add_row("Active Users", str(active_users))
         
         # Add API key counts
-        api_keys = db.exec(select(APIKey)).all()
+        api_keys = db.execute(select(APIKey)).scalars().all()
         active_keys = sum(1 for key in api_keys if key.is_active)
         table.add_row("Total API Keys", str(len(api_keys)))
         table.add_row("Active API Keys", str(active_keys))
@@ -240,7 +239,7 @@ Available objects:
 
 Example usage:
 >>> with get_db_session() as db:
-...     users = db.exec(select(User)).all()
+...     users = db.execute(select(User)).scalars().all()
 ...     console.print(users)
 
 >>> log_manager = LogManager()

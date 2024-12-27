@@ -3,11 +3,11 @@ uvicorn
 python-multipart
 requests
 pydantic>=2.0.0
+email-validator
 python-dotenv
 beautifulsoup4
 pydantic-settings
 git+https://github.com/microsoft/markitdown.git
-slowapi
 pytest
 httpx
 pytest-asyncio

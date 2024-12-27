@@ -16,7 +16,8 @@ def create_user(
     """Create a new user."""
     try:
         # Check if email exists
-        if db.exec(select(User).where(User.email == email)).first():
+        stmt = select(User).where(User.email == email)
+        if db.execute(stmt).scalar_one_or_none():
             raise ValueError("Email already exists")
         
         # Create user
@@ -53,7 +54,8 @@ def get_user(db: Session, user_id: int) -> Optional[User]:
 
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """Get a user by email."""
-    return db.exec(select(User).where(User.email == email)).first()
+    stmt = select(User).where(User.email == email)
+    return db.execute(stmt).scalar_one_or_none()
 
 def update_user_status(
     db: Session,

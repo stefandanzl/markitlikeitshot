@@ -9,8 +9,8 @@ FOLLOW_LOGS=false
 CLEAN=false
 CLEAN_ALL=false
 FORCE=false
-SHELL=false  # New option for shell access
-INTERACTIVE=false  # New option for interactive CLI
+SHELL=false  # Option for shell access
+INTERACTIVE=false  # Option for interactive CLI
 
 # Colors for better visibility
 declare -A COLORS=(

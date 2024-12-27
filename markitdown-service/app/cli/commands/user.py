@@ -57,7 +57,7 @@ def list(
             if not show_inactive:
                 query = query.where(User.status == UserStatus.ACTIVE)
             
-            users = db.exec(query).all()
+            users = db.execute(query).scalars().all()
             
             if not users:
                 console.print(Panel(
