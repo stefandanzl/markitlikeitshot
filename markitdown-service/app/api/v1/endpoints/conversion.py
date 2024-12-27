@@ -205,34 +205,24 @@ def get_rate_limit_headers(request: Request) -> dict:
     now = int(time.time())
     window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
     window_reset = now + window_seconds
-    
-    # Get rate limit info from state
-    rate_limit_info = getattr(request.state, "_rate_limit_info", None)
-    view_rate_limit = getattr(request.state, "view_rate_limit", None)
     remaining = settings.RATE_LIMIT_REQUESTS - 1  # Default to max - 1 for current request
     
-    # First try slowapi's view_rate_limit
+    # Get rate limit info from slowapi's view_rate_limit
+    view_rate_limit = getattr(request.state, "view_rate_limit", None)
+    
     if view_rate_limit:
+        # Handle both tuple formats (RateLimitItem, list) or (dict, limit, period)
         if isinstance(view_rate_limit, tuple):
-            # Extract rate limit info from tuple (info, limit_value, period)
-            rate_limit_data = view_rate_limit[0]
-            if isinstance(rate_limit_data, dict):
-                remaining = rate_limit_data.get("remaining", remaining)
-                if "reset" in rate_limit_data:
-                    window_reset = rate_limit_data["reset"]
-        elif isinstance(view_rate_limit, dict):
-            remaining = view_rate_limit.get("remaining", remaining)
-            if "reset" in view_rate_limit:
-                window_reset = view_rate_limit["reset"]
-    # Fall back to our _rate_limit_info
-    elif rate_limit_info and isinstance(rate_limit_info, dict):
-        remaining = rate_limit_info.get("remaining", remaining)
-        if "reset" in rate_limit_info:
-            window_reset = rate_limit_info["reset"]
+            if len(view_rate_limit) >= 2:  # We only need the first two elements
+                rate_limit_data = view_rate_limit[1]  # Get the second element which contains the limit info
+                if isinstance(rate_limit_data, list) and len(rate_limit_data) >= 3:
+                    _, limit, reset = rate_limit_data
+                    window_reset = reset
+                    remaining = limit - 1
     
     return {
         "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-        "X-RateLimit-Remaining": str(remaining),
+        "X-RateLimit-Remaining": str(max(0, remaining)),
         "X-RateLimit-Reset": str(window_reset),
         "Retry-After": str(window_seconds)
     }
