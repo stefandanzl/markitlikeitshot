@@ -70,7 +70,7 @@ def list(
             if not show_inactive:
                 query = query.where(APIKey.is_active == True)
                 
-            api_keys = db.exec(query).all()
+            api_keys = db.execute(query).scalars().all()
             
             if not api_keys:
                 console.print("[yellow]No API keys found[/yellow]")

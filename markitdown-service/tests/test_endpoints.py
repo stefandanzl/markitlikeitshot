@@ -8,6 +8,7 @@ from pathlib import Path
 from app.main import app
 from app.core.config import settings
 from app.models.auth.api_key import Role, APIKey
+from app.core.rate_limiting.limiter import limiter
 
 # Test file path
 TEST_FILE_PATH = Path(__file__).parent / "test_files" / "TestDoc.docx"
@@ -16,7 +17,7 @@ class TestNoAuthAPI:
     """Test API endpoints without authentication required"""
     
     @pytest.fixture(autouse=True)
-    def setup(self, no_auth_client):
+    def setup(self, no_auth_client, disable_rate_limiting):
         self.client = no_auth_client
 
     def test_health_check(self) -> None:
@@ -116,6 +117,34 @@ class TestAuthAPI:
     def setup(self, auth_client):
         self.client, self.api_key, self.admin_key = auth_client
         self.headers = {settings.API_KEY_HEADER_NAME: self.api_key}
+        settings.RATE_LIMITING_ENABLED = True
+        
+        # Set test-specific rate limiting values
+        self.original_rate_limit = settings.RATE_LIMIT_DEFAULT_RATE
+        self.original_rate_period = settings.RATE_LIMIT_DEFAULT_PERIOD
+        self.original_rate_limits = settings.RATE_LIMITS.copy()
+        
+        settings.RATE_LIMIT_DEFAULT_RATE = settings.TEST_RATE_LIMIT_DEFAULT_RATE
+        settings.RATE_LIMIT_DEFAULT_PERIOD = settings.TEST_RATE_LIMIT_DEFAULT_PERIOD
+        settings.RATE_LIMITS = {
+            "/api/v1/convert/url": {"rate": settings.TEST_RATE_LIMIT_DEFAULT_RATE, "per": settings.TEST_RATE_LIMIT_DEFAULT_PERIOD},
+            "/api/v1/convert/file": {"rate": settings.TEST_RATE_LIMIT_DEFAULT_RATE, "per": settings.TEST_RATE_LIMIT_DEFAULT_PERIOD},
+            "/api/v1/convert/text": {"rate": settings.TEST_RATE_LIMIT_DEFAULT_RATE, "per": settings.TEST_RATE_LIMIT_DEFAULT_PERIOD}
+        }
+        
+        limiter.reset()
+        #print(f"Test setup complete. Rate limits: {settings.RATE_LIMITS}")
+
+    def teardown_method(self, method):
+        settings.RATE_LIMITING_ENABLED = True
+        
+        # Restore original rate limiting values
+        settings.RATE_LIMIT_DEFAULT_RATE = self.original_rate_limit
+        settings.RATE_LIMIT_DEFAULT_PERIOD = self.original_rate_period
+        settings.RATE_LIMITS = self.original_rate_limits
+        
+        limiter.reset()
+        #print("Test teardown complete. Rate limits restored.")
 
     def test_health_check_auth(self) -> None:
         """Test health check endpoint (should work without auth)"""
@@ -233,7 +262,7 @@ class TestAuthAPI:
         )
         
         assert response.status_code == 403
-        assert response.json()["detail"] in ["Invalid API key", "API key validation failed"]
+        assert response.json()["detail"] == "Invalid or inactive API key"
 
     def test_empty_api_key(self) -> None:
         """Test with empty API key"""

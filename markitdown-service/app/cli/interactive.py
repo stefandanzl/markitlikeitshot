@@ -195,7 +195,7 @@ def create_key_menu():
     console.print("\n[cyan]Available Users:[/cyan]")
     with get_db_session() as db:
         query = select(User).where(User.status == UserStatus.ACTIVE)
-        users = db.exec(query).all()
+        users = db.execute(query).scalars().all()
         
         if not users:
             console.print("[yellow]No active users found[/yellow]")

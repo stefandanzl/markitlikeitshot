@@ -2,7 +2,7 @@ from datetime import datetime, UTC
 import secrets
 import bcrypt
 from typing import Optional
-from fastapi import Security, HTTPException, Depends
+from fastapi import Security, HTTPException, Depends, Request
 from fastapi.security.api_key import APIKeyHeader
 from starlette.status import HTTP_403_FORBIDDEN
 from sqlmodel import Session, select
@@ -34,6 +34,15 @@ def verify_key_hash(key: str, hashed_key: str) -> bool:
     hashed_key_bytes = hashed_key.encode('utf-8')
     return bcrypt.checkpw(key_bytes, hashed_key_bytes)
 
+def lookup_api_key(db: Session, key: str) -> Optional[APIKey]:
+    """Look up an API key without verifying it."""
+    stmt = select(APIKey).where(APIKey.is_active == True)
+    api_keys = db.execute(stmt).scalars().all()
+    for api_key in api_keys:
+        if verify_key_hash(key, api_key.key):
+            return api_key
+    return None
+
 def create_api_key(
     db: Session,
     name: str,
@@ -50,12 +59,11 @@ def create_api_key(
             raise ValueError(f"User {user.name} is not active")
 
         # Check for existing key with same name for this user
-        existing = db.exec(
-            select(APIKey).where(
-                APIKey.name == name,
-                APIKey.user_id == user_id
-            )
-        ).first()
+        stmt = select(APIKey).where(
+            APIKey.name == name,
+            APIKey.user_id == user_id
+        )
+        existing = db.execute(stmt).scalar_one_or_none()
         
         if existing:
             raise ValueError(f"API key with name '{name}' already exists for this user")
@@ -108,18 +116,11 @@ def create_api_key(
 def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
     """Verify an API key and update last used timestamp."""
     try:
-        # Get all active keys for active users
-        api_keys = db.exec(
-            select(APIKey)
-            .join(User)
-            .where(
-                APIKey.is_active == True,
-                User.status == UserStatus.ACTIVE
-            )
-        ).all()
-        
-        for api_key in api_keys:
-            if verify_key_hash(key, api_key.key):
+        api_key = lookup_api_key(db, key)
+        if api_key:
+            # Check if the user is active
+            user = db.get(User, api_key.user_id)
+            if user and user.status == UserStatus.ACTIVE:
                 api_key.last_used = datetime.now(UTC)
                 db.flush()
                 
@@ -133,6 +134,8 @@ def verify_api_key(db: Session, key: str) -> Optional[APIKey]:
                     }
                 )
                 return api_key
+            else:
+                logger.warning(f"Attempt to use API key for inactive user: {api_key.user_id}")
         
         return None
         
@@ -203,7 +206,10 @@ def reactivate_api_key(
         logger.exception(f"Failed to reactivate API key {key_id}")
         raise
 
+# app/core/security/api_key.py
+
 async def get_api_key(
+    request: Request,
     api_key: str = Security(api_key_header),
     db: Session = Depends(get_db)
 ) -> Optional[APIKey]:
@@ -212,9 +218,11 @@ async def get_api_key(
     Returns None if API key auth is disabled.
     """
     if not settings.API_KEY_AUTH_ENABLED:
+        logger.debug("API key authentication is disabled")
         return None
         
     if not api_key:
+        logger.warning("API key missing in request")
         raise HTTPException(
             status_code=HTTP_403_FORBIDDEN,
             detail="API key required"
@@ -230,18 +238,24 @@ async def get_api_key(
                 details="Invalid API key attempt",
                 status="failure"
             )
+            logger.warning(f"Invalid API key attempt: {api_key[:5]}...")
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
-                detail="Invalid API key"
+                detail="Invalid or inactive API key"
             )
         
+        # Store API key in request state
+        request.state.api_key = key
+        logger.debug(f"API key validated successfully: {key.id}")
         return key
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception("API key validation failed")
+        logger.exception("Unexpected error during API key validation")
         raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="API key validation failed"
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during API key validation"
         )
 
 def require_admin(api_key: APIKey = Depends(get_api_key)):

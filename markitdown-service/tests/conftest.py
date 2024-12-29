@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.db.session import get_db_session, get_engine
 from app.core.security.api_key import create_api_key
 from app.core.security.user import create_user
+from app.core.rate_limiting.limiter import limiter
 from app.models.auth.api_key import Role, APIKey
 from app.models.auth.user import User, UserStatus
 
@@ -59,11 +60,22 @@ def no_auth_client():
     settings.API_KEY_AUTH_ENABLED = original_auth_setting
 
 @pytest.fixture
+def disable_rate_limiting():
+    """Temporarily disable rate limiting for tests"""
+    original_rate_limiting = settings.RATE_LIMITING_ENABLED
+    settings.RATE_LIMITING_ENABLED = False
+    limiter.reset()
+    yield
+    settings.RATE_LIMITING_ENABLED = original_rate_limiting
+    limiter.reset()
+
+@pytest.fixture
 def auth_client(db_session):
     """Setup test environment with API key auth enabled"""
     original_auth_setting = settings.API_KEY_AUTH_ENABLED
+    original_rate_limiting = settings.RATE_LIMITING_ENABLED
     settings.API_KEY_AUTH_ENABLED = True
-    client = TestClient(app)
+    settings.RATE_LIMITING_ENABLED = True
     
     # Clean up any existing test users and keys
     db_session.exec(delete(APIKey).where(APIKey.name.in_(["test-user", "test-admin"])))
@@ -100,6 +112,9 @@ def auth_client(db_session):
     
     db_session.commit()
     
+    # Create client
+    client = TestClient(app)
+    
     yield client, api_key.key, admin_key.key
     
     # Cleanup
@@ -107,3 +122,5 @@ def auth_client(db_session):
     db_session.exec(delete(User).where(User.email.in_(["test-user@example.com", "test-admin@example.com"])))
     db_session.commit()
     settings.API_KEY_AUTH_ENABLED = original_auth_setting
+    settings.RATE_LIMITING_ENABLED = original_rate_limiting
+    limiter.reset()

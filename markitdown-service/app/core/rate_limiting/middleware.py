@@ -1,57 +1,69 @@
-from fastapi import Request
+# app/core/rate_limiting/middleware.py
+from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+from app.core.rate_limiting.limiter import RateLimitExceeded, limiter, rate_limit
+from fastapi.responses import JSONResponse
 import time
+import logging
 from app.core.config.settings import settings
 
-class RateLimitItem:
-    """Class that provides the interface slowapi expects for rate limiting"""
-    def __init__(self, amount: int, key: str):
-        self.amount = amount
-        self.key = key
-        self.error_message = f"{amount} per {settings.RATE_LIMIT_PERIOD}"
+logger = logging.getLogger(__name__)
 
-    def key_for(self, *args):
-        return self.key
-
-class RateLimitStateMiddleware(BaseHTTPMiddleware):
+class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp):
         super().__init__(app)
 
     async def dispatch(self, request: Request, call_next):
-        # Get the current window's reset time
-        now = int(time.time())
-        window_seconds = 60 if settings.RATE_LIMIT_PERIOD == "minute" else 3600
-        window_reset = now + window_seconds
+        if not settings.RATE_LIMITING_ENABLED:
+            return await call_next(request)
 
-        # Initialize rate limit info
-        key = f"rate_limit_{request.url.path}"
-        rate_limit_item = RateLimitItem(amount=settings.RATE_LIMIT_REQUESTS, key=key)
+        path = request.url.path
         
-        # Set view_rate_limit in slowapi expected format
-        request.state.view_rate_limit = (
-            rate_limit_item, 
-            [key, settings.RATE_LIMIT_REQUESTS, window_reset],
-            settings.RATE_LIMIT_PERIOD
+        # Check if the path is excluded from rate limiting
+        if any(path.startswith(excluded) for excluded in settings.RATE_LIMIT_EXCLUDED_ENDPOINTS):
+            return await call_next(request)
+
+        # Get endpoint-specific limits from settings
+        rate_limits = next(
+            (limits for defined_path, limits in settings.RATE_LIMITS.items() if path.startswith(defined_path)),
+            {
+                "rate": settings.RATE_LIMIT_DEFAULT_RATE,
+                "per": settings.RATE_LIMIT_DEFAULT_PERIOD
+            }
         )
 
-        # Process the request
+        # Apply rate limiting
+        response = Response()
+        is_allowed, limit_info = limiter.check_rate_limit(
+            request,
+            response,
+            rate=rate_limits["rate"],
+            per=rate_limits["per"]
+        )
+
+        # If rate limit is exceeded, return 429 response
+        if not is_allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "detail": "Rate limit exceeded",
+                    "retry_after": limit_info["retry_after"]
+                },
+                headers={
+                    "X-RateLimit-Limit": str(limit_info["limit"]),
+                    "X-RateLimit-Remaining": "0",
+                    "X-RateLimit-Reset": str(limit_info["reset"]),
+                    "Retry-After": str(limit_info["retry_after"])
+                }
+            )
+
+        # If rate limiting passes, proceed with the request
         response = await call_next(request)
-
-        # Clear any existing rate limit headers to prevent duplicates
-        headers_to_set = {
-            "X-RateLimit-Limit": str(settings.RATE_LIMIT_REQUESTS),
-            "X-RateLimit-Reset": str(window_reset),
-            "X-RateLimit-Remaining": str(max(0, settings.RATE_LIMIT_REQUESTS - 1)),
-            "Retry-After": str(window_seconds)
-        }
         
-        # Remove any existing rate limit headers
-        for header in headers_to_set.keys():
-            if header in response.headers:
-                del response.headers[header]
+        # Set rate limit headers for all responses
+        response.headers["X-RateLimit-Limit"] = str(limit_info["limit"])
+        response.headers["X-RateLimit-Remaining"] = str(limit_info["remaining"])
+        response.headers["X-RateLimit-Reset"] = str(limit_info["reset"])
         
-        # Set fresh headers
-        response.headers.update(headers_to_set)
-
         return response

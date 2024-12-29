@@ -55,8 +55,25 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting Settings
-    RATE_LIMIT_REQUESTS: int = 10
-    RATE_LIMIT_PERIOD: str = "minute"
+    RATE_LIMITING_ENABLED: bool = True
+    RATE_LIMIT_DEFAULT_RATE: int = 30  # requests
+    RATE_LIMIT_DEFAULT_PERIOD: int = 60  # seconds
+    
+    # Test-specific rate limiting settings
+    TEST_RATE_LIMIT_DEFAULT_RATE: int = 5  # requests
+    TEST_RATE_LIMIT_DEFAULT_PERIOD: int = 5  # seconds
+    
+    # Endpoint-specific rate limits
+    RATE_LIMITS: Dict[str, Dict[str, int]] = {
+        "/api/v1/convert/url": {"rate": 60, "per": 60},
+        "/api/v1/convert/file": {"rate": 60, "per": 60},
+        "/api/v1/convert/text": {"rate": 60, "per": 60}
+    }
+
+    # Endpoints excluded from rate limiting
+    RATE_LIMIT_EXCLUDED_ENDPOINTS: List[str] = [
+        "/api/v1/admin/*"
+    ]
 
     # CORS Settings
     ALLOWED_ORIGINS: List[str] = ["*"]
@@ -166,6 +183,12 @@ class Settings(BaseSettings):
         level_name = self.LOG_LEVEL.upper() or env_levels.get(self.ENVIRONMENT, "INFO")
         return LoggingConfig.LEVEL_MAP.get(level_name, LoggingConfig.INFO)
 
+    def get_retention_days(self, log_type: str) -> int:
+        """Get environment-adjusted retention period for log type"""
+        base_days = self.LOG_RETENTION_DAYS.get(log_type, 30)
+        multiplier = self.LOG_RETENTION_MULTIPLIERS.get(self.ENVIRONMENT, 1.0)
+        return int(base_days * multiplier)
+
     def get_component_log_level(self, component: str) -> int:
         """Get log level for specific component"""
         if component in self.COMPONENT_LOG_LEVELS:
@@ -174,12 +197,6 @@ class Settings(BaseSettings):
                 self.get_log_level
             )
         return self.get_log_level
-
-    def get_retention_days(self, log_type: str) -> int:
-        """Get environment-adjusted retention period for log type"""
-        base_days = self.LOG_RETENTION_DAYS.get(log_type, 30)
-        multiplier = self.LOG_RETENTION_MULTIPLIERS.get(self.ENVIRONMENT, 1.0)
-        return int(base_days * multiplier)
 
 @lru_cache()
 def get_settings() -> Settings:

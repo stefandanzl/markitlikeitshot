@@ -3,7 +3,6 @@ from app.core.config import settings
 from functools import lru_cache
 from contextlib import contextmanager
 from fastapi import HTTPException
-from slowapi.errors import RateLimitExceeded
 import logging
 
 logger = logging.getLogger(__name__)
@@ -35,8 +34,8 @@ def get_db_session():
     try:
         yield session
         session.commit()
-    except (HTTPException, RateLimitExceeded):
-        # Don't log HTTPExceptions or RateLimitExceeded as errors - they're expected
+    except HTTPException:
+        # Don't log HTTPExceptions as errors - they're expected
         session.rollback()
         raise
     except Exception as e:
