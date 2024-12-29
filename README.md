@@ -283,12 +283,28 @@ API_KEY_AUTH_ENABLED=false
 
 ### Rate Limiting
 
-Rate limiting is applied to all requests, regardless of whether API key authentication is enabled or disabled. The rate limiting is based on either the API key (if present) or the client's IP address. To modify the rate limiting settings:
+Rate limiting is applied to all requests, regardless of whether API key authentication is enabled or disabled. The rate limiting is based on either the API key (if present) or the client's IP address. The current rate limiting settings are:
+
+- Default rate limit: 30 requests per 60 seconds
+- Endpoint-specific rate limits:
+  - `/api/v1/convert/url`: 60 requests per 60 seconds
+  - `/api/v1/convert/file`: 60 requests per 60 seconds
+  - `/api/v1/convert/text`: 60 requests per 60 seconds
+
+Rate limiting can be enabled or disabled using the `RATE_LIMITING_ENABLED` setting.
+
+Certain endpoints can be excluded from rate limiting. Currently, all endpoints under `/api/v1/admin/*` are excluded.
+
+For testing purposes, there are separate rate limit settings:
+- Test rate limit: 5 requests per 5 seconds
+
+To modify these settings, you can use environment variables:
 
 ```yaml
 environment:
-  - RATE_LIMIT_REQUESTS=100
-  - RATE_LIMIT_PERIOD=minute
+  - RATE_LIMITING_ENABLED=true
+  - RATE_LIMIT_DEFAULT_RATE=30
+  - RATE_LIMIT_DEFAULT_PERIOD=60
 ```
 
 These settings define the number of requests allowed per time period for each unique API key or IP address. You can adjust these values to suit your needs.
