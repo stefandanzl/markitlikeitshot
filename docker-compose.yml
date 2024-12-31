@@ -38,6 +38,9 @@ services:
     build: 
       context: ./markitdown-service
       dockerfile: Dockerfile
+      args:
+        - UID=${UID:-1000}
+        - GID=${GID:-1000}
     ports:
       - "8000:8000"
     volumes:
@@ -47,8 +50,6 @@ services:
       - type: volume
         source: markitdown_prod_logs
         target: /app/logs
-        volume:
-          nocopy: false
     environment:
       - ENVIRONMENT=production
       - DATABASE_URL=sqlite:///./data/api_keys.db
@@ -63,6 +64,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+    user: "${UID:-1000}:${GID:-1000}"
     profiles:
       - prod
         
@@ -81,7 +83,7 @@ services:
       - type: volume
         source: markitdown_test_data
         target: /app/data
-      - ./markitdown-service/logs:/app/logs  # Local log access for test analysis
+      - ./markitdown-service/logs:/app/logs
     environment:
       - ENVIRONMENT=test
       - PYTHONPATH=/app
