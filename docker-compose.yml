@@ -1,7 +1,7 @@
 services:
   # Development service
   markitdown-dev:
-    build: 
+    build:
       context: ./markitdown-service
       dockerfile: Dockerfile
       args:
@@ -9,6 +9,7 @@ services:
         - GID=${GID:-1000}
     ports:
       - "8000:8000"
+      - "3000:8000"
     volumes:
       - ./markitdown-service/app:/app/app  # Enable hot reload
       - type: volume

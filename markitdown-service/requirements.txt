@@ -7,7 +7,7 @@ email-validator
 python-dotenv
 beautifulsoup4
 pydantic-settings
-git+https://github.com/microsoft/markitdown.git
+markitdown[all]
 pytest
 httpx
 pytest-asyncio

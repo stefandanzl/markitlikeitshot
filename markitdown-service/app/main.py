@@ -4,8 +4,9 @@ import logging.config
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 import os
 from pathlib import Path
@@ -174,12 +175,83 @@ app.include_router(
     dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
 )
 
+# Public conversion endpoint for frontend (no API key required)
+from fastapi import UploadFile, File, status
+from fastapi.responses import PlainTextResponse, Response
+
+@app.post(
+    "/public/api/v1/convert/file",
+    response_class=PlainTextResponse,
+    tags=["public-conversion"]
+)
+@handle_api_operation(
+    "public_convert_file",
+    error_map={
+        "ConversionError": (status.HTTP_422_UNPROCESSABLE_ENTITY, None),
+        "RateLimitExceeded": (status.HTTP_429_TOO_MANY_REQUESTS, None),
+        **conversion.DEFAULT_ERROR_MAP
+    }
+)
+async def public_convert_file(
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+) -> PlainTextResponse:
+    """Convert an uploaded file to markdown (public endpoint)."""
+    # Import required modules
+    from app.core.security.api_key import get_api_key_from_string
+
+    # Apply rate limiting
+    await conversion.rate_limit(
+        rate=settings.RATE_LIMITS["/api/v1/convert/file"]["rate"],
+        per=settings.RATE_LIMITS["/api/v1/convert/file"]["per"]
+    )(request, response)
+
+    # Use dev admin key for public requests
+    api_key = get_api_key_from_string("dev-admin-key")
+
+    ext, content = await conversion.validate_upload_file(file=file)
+
+    conversion.log_conversion_attempt(
+        "file",
+        {
+            "filename": file.filename,
+            "content_type": file.content_type,
+            "extension": ext,
+        },
+        str(api_key.id) if api_key else "public"
+    )
+
+    with conversion.save_temp_file(content, suffix=ext) as temp_file_path:
+        markdown_content = conversion.process_conversion(
+            temp_file_path,
+            ext,
+            content_type=file.content_type
+        )
+
+        return PlainTextResponse(
+            content=markdown_content,
+            status_code=status.HTTP_200_OK
+        )
+
 # Include admin router with API key dependency
 app.include_router(
     admin.router,
     prefix=settings.API_V1_STR,
     dependencies=[Depends(get_api_key)] if settings.API_KEY_AUTH_ENABLED else None
 )
+
+# Serve the frontend
+@app.get("/", tags=["frontend"])
+async def serve_frontend():
+    """Serve the main frontend page."""
+    frontend_path = Path(__file__).parent / "frontend" / "index.html"
+    if frontend_path.exists():
+        return FileResponse(frontend_path)
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Frontend not found"}
+    )
 
 # Health check endpoint (no API key required)
 @app.get("/health", tags=["system"])
